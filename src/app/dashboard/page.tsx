@@ -1,32 +1,30 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { useNoraStore } from '@/lib/store';
 import { formatFCFA, formatDateFR } from '@/lib/utils';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
-  TrendingUp, TrendingDown, DollarSign, AlertCircle, Users,
+  TrendingUp, AlertCircle, Users,
   Clock, ShoppingBag, Download, PlusCircle, Package, Wallet,
   Receipt, CalendarDays, ArrowUpRight, ArrowDownRight, Minus,
-  CheckCircle2, Eye,
+  CheckCircle2, UserPlus, Sparkles,
 } from 'lucide-react';
 import {
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar,
+  ResponsiveContainer, AreaChart, Area,
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import { generateInvoicePDF, downloadPDF } from '@/lib/pdf-generator';
 
-// ─── Calcul de périodes en JS pur (sans plugins dayjs) ─────────────────────
 function getPeriods() {
   const now   = new Date();
   const y     = now.getFullYear();
   const m     = now.getMonth();
   const d     = now.getDate();
 
-  // Lundi de la semaine courante
-  const dow         = now.getDay(); // 0=dim
+  const dow         = now.getDay();
   const daysToMon   = dow === 0 ? 6 : dow - 1;
 
   const todayStart  = new Date(y, m, d).getTime();
@@ -35,7 +33,6 @@ function getPeriods() {
   const monthStart  = new Date(y, m, 1).getTime();
   const yearStart   = new Date(y, 0, 1).getTime();
 
-  // Périodes précédentes (pour comparaison)
   const prevDayStart   = todayStart - 86400000;
   const prevDayEnd     = todayStart - 1;
   const prevWeekStart  = weekStart  - 7 * 86400000;
@@ -62,7 +59,6 @@ function sumField<T extends { created_at: string }>(
     .reduce((acc, x) => acc + (Number(x[field]) || 0), 0);
 }
 
-// Variation en % par rapport à la période précédente
 function variation(cur: number, prev: number): { pct: number; dir: 'up' | 'down' | 'flat' } {
   if (prev === 0 && cur === 0) return { pct: 0, dir: 'flat' };
   if (prev === 0) return { pct: 100, dir: 'up' };
@@ -70,7 +66,6 @@ function variation(cur: number, prev: number): { pct: number; dir: 'up' | 'down'
   return { pct: Math.abs(p), dir: p > 0 ? 'up' : p < 0 ? 'down' : 'flat' };
 }
 
-// ─── Composant carte KPI ───────────────────────────────────────────────────
 function KpiCard({
   label, value, prev, icon: Icon, theme, sub,
 }: {
@@ -116,7 +111,6 @@ function KpiCard({
   );
 }
 
-// ─── Groupe de 5 cartes ────────────────────────────────────────────────────
 function KpiGroup({ label, icon: Icon, color, rows }: {
   label: string; icon: React.ElementType; color: string;
   rows: { period: string; value: number; prev?: number; sub?: string }[];
@@ -126,7 +120,7 @@ function KpiGroup({ label, icon: Icon, color, rows }: {
   };
   return (
     <div>
-      <div className={`flex items-center gap-2 mb-3`}>
+      <div className="flex items-center gap-2 mb-3">
         <Icon className={`w-4 h-4 ${color}`} />
         <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</h2>
       </div>
@@ -147,7 +141,6 @@ function KpiGroup({ label, icon: Icon, color, rows }: {
   );
 }
 
-// ─── Tooltip graphique ─────────────────────────────────────────────────────
 function ChartTip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -164,39 +157,31 @@ function ChartTip({ active, payload, label }: any) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════
 export default function DashboardPage() {
   const { orders, customers, expenses, pressing, isLoaded } = useNoraStore();
 
-  // ── Tous les hooks AVANT tout return conditionnel (Rules of Hooks) ──────
-  // Calcul des périodes (JS pur, aucun plugin dayjs)
   const P = useMemo(() => getPeriods(), []);
 
-  // Helpers
   const oSum = (from: number, to?: number) =>
     sumField(orders, 'total_amount', from, to);
   const eSum = (from: number, to?: number) =>
     sumField(expenses, 'amount', from, to) +
     sumField(orders,   'total_expenses', from, to);
 
-  // ── Guard — après tous les hooks ────────────────────────────────────────
   if (!isLoaded) return null;
 
-  // ── CA par période ──────────────────────────────────────────────────────
   const ca = {
     today: oSum(P.todayStart),
     week:  oSum(P.weekStart,  P.weekEnd),
     month: oSum(P.monthStart),
     year:  oSum(P.yearStart),
     all:   orders.reduce((s, o) => s + o.total_amount, 0),
-    // Périodes précédentes
     prevDay:   oSum(P.prevDayStart,   P.prevDayEnd),
     prevWeek:  oSum(P.prevWeekStart,  P.prevWeekEnd),
     prevMonth: oSum(P.prevMonthStart, P.prevMonthEnd),
     prevYear:  oSum(P.prevYearStart,  P.prevYearEnd),
   };
 
-  // ── Dépenses par période ────────────────────────────────────────────────
   const dep = {
     today: eSum(P.todayStart),
     week:  eSum(P.weekStart,  P.weekEnd),
@@ -209,7 +194,6 @@ export default function DashboardPage() {
     prevYear:  eSum(P.prevYearStart,  P.prevYearEnd),
   };
 
-  // ── Bénéfice = CA - Dépenses ────────────────────────────────────────────
   const ben = {
     today: ca.today - dep.today,
     week:  ca.week  - dep.week,
@@ -222,7 +206,6 @@ export default function DashboardPage() {
     prevYear:  ca.prevYear  - dep.prevYear,
   };
 
-  // ── Compteurs opérationnels ─────────────────────────────────────────────
   const now = new Date();
   const y = now.getFullYear(); const m = now.getMonth(); const d = now.getDate();
   const todayTs = new Date(y, m, d).getTime();
@@ -233,7 +216,6 @@ export default function DashboardPage() {
   const clientsActifs    = customers.filter((c) => c.orders_count > 0).length;
   const montantsImpayes  = orders.reduce((s, o) => s + o.remaining_amount, 0);
 
-  // ── Graphique 7 jours ───────────────────────────────────────────────────
   const last7 = Array.from({ length: 7 }).map((_, i) => {
     const dayTs   = new Date(y, m, d - (6 - i)).getTime();
     const dayEnd  = dayTs + 86400000 - 1;
@@ -245,12 +227,10 @@ export default function DashboardPage() {
     };
   });
 
-  // ── Top services ────────────────────────────────────────────────────────
   const svcMap: Record<string, number> = {};
   orders.forEach((o) => { const n = o.offer_name || 'Autre'; svcMap[n] = (svcMap[n] || 0) + o.total_amount; });
   const topSvc = Object.entries(svcMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  // ── Top clients ──────────────────────────────────────────────────────────
   const topCusts = [...customers].sort((a, b) => b.total_spent - a.total_spent).slice(0, 5);
   const recentOrds = [...orders].sort((a, b) => ts(b.created_at) - ts(a.created_at)).slice(0, 6);
 
@@ -269,7 +249,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Tableau de Bord</h1>
           <p className="text-sm text-slate-400 mt-0.5">
-            {pressing.name} · {now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            {pressing.name || 'Nora Pressing'} · {now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
         <Link href="/dashboard/orders/new">
@@ -278,6 +258,28 @@ export default function DashboardPage() {
           </Button>
         </Link>
       </div>
+
+      {/* ─── Alerte Espace Neuf si 0 donnée ───────────────────────── */}
+      {orders.length === 0 && customers.length === 0 && (
+        <div className="p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+          <div className="space-y-1">
+            <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-[#2563EB]" />
+              Bienvenue sur votre espace Nora Pressing !
+            </h3>
+            <p className="text-xs text-slate-600">
+              Votre espace est actuellement vide. Commencez par enregistrer vos prestations et ajouter votre première commande client.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link href="/dashboard/orders/new">
+              <Button variant="secondary" size="sm" className="gap-1.5 text-xs font-bold">
+                <PlusCircle className="w-4 h-4" />Créer une commande
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* ─── Cartes CA ────────────────────────────────────────────── */}
       <KpiGroup
@@ -375,7 +377,7 @@ export default function DashboardPage() {
             <h3 className="text-sm font-bold text-slate-900">Top prestations (cumul)</h3>
           </CardHeader>
           <CardBody className="p-4 space-y-3">
-            {topSvc.length === 0 && <p className="text-xs text-slate-400 text-center py-6">Aucune donnée</p>}
+            {topSvc.length === 0 && <p className="text-xs text-slate-400 text-center py-6">Aucune prestation enregistrée</p>}
             {topSvc.map(([name, val]) => (
               <div key={name} className="flex items-center gap-3">
                 <p className="text-xs font-semibold text-slate-700 w-32 truncate shrink-0">{name}</p>
@@ -413,7 +415,11 @@ export default function DashboardPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {recentOrds.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">Aucune commande</td></tr>
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                      Aucune commande enregistrée. Commencez par créer votre première commande.
+                    </td>
+                  </tr>
                 )}
                 {recentOrds.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50/80 transition-colors">
@@ -446,7 +452,7 @@ export default function DashboardPage() {
             <h3 className="text-sm font-bold text-slate-900">Top clients</h3>
           </CardHeader>
           <CardBody className="p-4 space-y-2">
-            {topCusts.length === 0 && <p className="text-xs text-slate-400 text-center py-6">Aucun client</p>}
+            {topCusts.length === 0 && <p className="text-xs text-slate-400 text-center py-6">Aucun client enregistré</p>}
             {topCusts.map((c, i) => (
               <div key={c.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors">
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black text-white shrink-0 ${['bg-amber-500','bg-slate-400','bg-orange-400','bg-slate-300','bg-slate-200'][i]}`}>

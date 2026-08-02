@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Card, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Sparkles, Lock, Mail, ArrowRight } from 'lucide-react';
-import { setAuthSession } from '@/lib/auth';
+import { Sparkles, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
+import { loginUser } from '@/lib/auth';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,29 +16,34 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       setError('Veuillez remplir tous les champs.');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères.');
       return;
     }
 
     setIsLoading(true);
 
-    // Pose le cookie de session → le middleware autorisera l'accès au dashboard
-    setAuthSession(email);
+    try {
+      // Authentification réelle avec vérification stricte
+      const result = await loginUser({ email, password });
 
-    setTimeout(() => {
-      setIsLoading(false);
+      if (!result.success) {
+        setError(result.error || 'Identifiants invalides.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Succès -> Redirection vers le dashboard
       router.push('/dashboard');
-    }, 500);
+      router.refresh();
+    } catch (err) {
+      setError('Une erreur est survenue lors de la connexion. Veuillez réespayer.');
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -46,11 +51,13 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-6">
         {/* Logo & Titre */}
         <div className="text-center space-y-2">
-          <img
-            src="/assets/logo.jpg"
-            alt="Nora Logo"
-            className="w-16 h-16 rounded-2xl mx-auto shadow-xl ring-4 ring-slate-800 object-cover"
-          />
+          <Link href="/">
+            <img
+              src="/assets/logo.jpg"
+              alt="Nora Logo"
+              className="w-16 h-16 rounded-2xl mx-auto shadow-xl ring-4 ring-slate-800 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+            />
+          </Link>
           <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center justify-center gap-1.5">
             Nora Pressing <Sparkles className="w-4 h-4 text-[#16A34A]" />
           </h1>
@@ -64,8 +71,9 @@ export default function LoginPage() {
             <h2 className="text-lg font-bold text-slate-900 text-center">Connexion à votre Espace</h2>
 
             {error && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl px-4 py-3 font-medium">
-                {error}
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl px-4 py-3 font-medium flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <span>{error}</span>
               </div>
             )}
 
@@ -116,7 +124,7 @@ export default function LoginPage() {
                 {isLoading ? (
                   <>
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Connexion en cours...</span>
+                    <span>Vérification...</span>
                   </>
                 ) : (
                   <>

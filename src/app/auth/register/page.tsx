@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Card, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Sparkles, ArrowRight, User, Mail, Lock } from 'lucide-react';
-import { setAuthSession } from '@/lib/auth';
+import { Sparkles, ArrowRight, User, Mail, Lock, AlertCircle } from 'lucide-react';
+import { registerUser } from '@/lib/auth';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -18,7 +18,7 @@ export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -26,8 +26,8 @@ export default function RegisterPage() {
       setError('Veuillez saisir votre nom complet.');
       return;
     }
-    if (!email) {
-      setError('Veuillez saisir une adresse email.');
+    if (!email.trim()) {
+      setError('Veuillez saisir une adresse email validée.');
       return;
     }
     if (password.length < 6) {
@@ -41,13 +41,23 @@ export default function RegisterPage() {
 
     setIsLoading(true);
 
-    // Pose le cookie de session → /onboarding sera accessible (route protégée)
-    setAuthSession(email);
+    try {
+      // Inscription réelle
+      const result = await registerUser({ fullName, email, password });
 
-    setTimeout(() => {
-      setIsLoading(false);
+      if (!result.success) {
+        setError(result.error || 'Erreur lors de la création du compte.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Redirection vers l'onboarding pour la première configuration du pressing
       router.push('/onboarding');
-    }, 500);
+      router.refresh();
+    } catch (err) {
+      setError('Une erreur est survenue lors de la création de votre compte.');
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -55,11 +65,13 @@ export default function RegisterPage() {
       <div className="max-w-md w-full space-y-6">
         {/* Logo & Titre */}
         <div className="text-center space-y-2">
-          <img
-            src="/assets/logo.jpg"
-            alt="Nora Logo"
-            className="w-16 h-16 rounded-2xl mx-auto shadow-xl ring-4 ring-slate-800 object-cover"
-          />
+          <Link href="/">
+            <img
+              src="/assets/logo.jpg"
+              alt="Nora Logo"
+              className="w-16 h-16 rounded-2xl mx-auto shadow-xl ring-4 ring-slate-800 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+            />
+          </Link>
           <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center justify-center gap-1.5">
             Créer un Espace Nora <Sparkles className="w-4 h-4 text-[#16A34A]" />
           </h1>
@@ -73,8 +85,9 @@ export default function RegisterPage() {
             <h2 className="text-lg font-bold text-slate-900 text-center">Inscription Administrateur</h2>
 
             {error && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl px-4 py-3 font-medium">
-                {error}
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl px-4 py-3 font-medium flex items-start gap-2.5">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <span>{error}</span>
               </div>
             )}
 
