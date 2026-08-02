@@ -1,0 +1,61 @@
+{
+  "id": "/?source=pwa",
+  "name": "Nora Pressing & Blanchisserie",
+  "short_name": "Nora Pressing",
+  "description": "Application SaaS de gestion de pressing et blanchisserie en Afrique francophone",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "orientation": "any",
+  "lang": "fr-FR",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/desktop.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Tableau de bord Nora sur ordinateur"
+    },
+    {
+      "src": "/screenshots/mobile.png",
+      "sizes": "720x1280",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Nora sur mobile"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nouvelle commande",
+      "short_name": "Commander",
+      "description": "Creer une nouvelle commande client",
+      "url": "/dashboard/orders/new",
+      "icons": [{"src": "/icons/icon-192x192.png", "sizes": "192x192"}]
+    },
+    {
+      "name": "Mes clients",
+      "short_name": "Clients",
+      "description": "Gerer la base de donnees clients",
+      "url": "/dashboard/customers",
+      "icons": [{"src": "/icons/icon-192x192.png", "sizes": "192x192"}]
+    }
+  ]
+}
