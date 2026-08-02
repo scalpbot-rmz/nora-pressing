@@ -1,34 +1,26 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   ShoppingBag,
   PlusCircle,
   Users,
-  Receipt,
-  LogOut,
+  Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { clearAuthSession } from '@/lib/auth';
 
 export function BottomNav() {
   const pathname = usePathname();
-  const router = useRouter();
 
   const navItems = [
     { href: '/dashboard', label: 'Accueil', icon: LayoutDashboard },
     { href: '/dashboard/orders', label: 'Commandes', icon: ShoppingBag },
     { href: '/dashboard/orders/new', label: 'Créer', icon: PlusCircle, isMain: true },
     { href: '/dashboard/customers', label: 'Clients', icon: Users },
-    { href: '/dashboard/expenses', label: 'Dépenses', icon: Receipt },
+    { href: '/dashboard/offers', label: 'Offres', icon: Tag },
   ];
-
-  const handleLogout = () => {
-    clearAuthSession();
-    router.push('/auth/login');
-  };
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-[#0F172A] text-slate-400 border-t border-slate-800 shadow-2xl px-1 py-2">
@@ -70,16 +62,6 @@ export function BottomNav() {
             </Link>
           );
         })}
-
-        {/* Bouton Déconnexion mobile */}
-        <button
-          onClick={handleLogout}
-          className="flex flex-col items-center justify-center py-1 px-3 rounded-xl text-slate-400 hover:text-rose-400 transition-all"
-          title="Déconnexion"
-        >
-          <LogOut className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px] tracking-tight">Sortir</span>
-        </button>
       </div>
     </nav>
   );

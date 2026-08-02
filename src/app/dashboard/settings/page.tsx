@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useNoraStore } from '@/lib/store';
+import { clearAuthSession } from '@/lib/auth';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,11 +15,19 @@ import {
   Receipt,
   Check,
   RotateCcw,
-  Sparkles,
+  LogOut,
 } from 'lucide-react';
 
 export default function SettingsPage() {
+  const router = useRouter();
   const { pressing, updatePressing, isLoaded } = useNoraStore();
+
+  const handleLogout = () => {
+    if (confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
+      clearAuthSession();
+      router.push('/auth/login');
+    }
+  };
 
   const [name, setName] = useState(pressing.name);
   const [logoUrl, setLogoUrl] = useState(pressing.logo_url || '');
@@ -215,6 +225,29 @@ export default function SettingsPage() {
           </Button>
         </div>
       </form>
+
+      {/* SECTION DÉCONNEXION */}
+      <div className="border-t border-slate-200 pt-6">
+        <Card className="border-rose-100 bg-rose-50/30">
+          <CardHeader className="bg-rose-50/60 border-b border-rose-100 flex items-center gap-2">
+            <LogOut className="w-5 h-5 text-rose-600" />
+            <h2 className="text-base font-bold text-rose-700">Déconnexion</h2>
+          </CardHeader>
+          <CardBody className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <p className="text-sm text-slate-600">
+              Fermez votre session en toute sécurité. Vous devrez vous reconnecter pour accéder au tableau de bord.
+            </p>
+            <Button
+              type="button"
+              onClick={handleLogout}
+              className="gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-md flex-shrink-0"
+            >
+              <LogOut className="w-4 h-4" />
+              Se déconnecter
+            </Button>
+          </CardBody>
+        </Card>
+      </div>
     </div>
   );
 }
