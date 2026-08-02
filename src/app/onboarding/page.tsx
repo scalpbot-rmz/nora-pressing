@@ -19,7 +19,7 @@ export default function OnboardingPage() {
   const [address, setAddress] = useState('Rue Joffre, Akwa');
   const [city, setCity] = useState('Douala');
   const [email, setEmail] = useState('contact@pressing-eclat.cm');
-  const [currency] = useState('FCFA');
+  const [currency, setCurrency] = useState('FCFA');
   const [isLoading, setIsLoading] = useState(false);
 
   if (!isLoaded) return null;
@@ -129,14 +129,38 @@ export default function OnboardingPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Devise Monétaire
+                  Devise monétaire
                 </label>
                 <input
                   type="text"
-                  disabled
-                  value={`${currency} (Franc CFA)`}
-                  className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-300 rounded-xl text-slate-700 font-bold text-sm"
+                  id="onboarding-currency"
+                  list="onboarding-currency-list"
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  placeholder="ex: FCFA, XAF, €, $"
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-800 font-semibold text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB]"
                 />
+                <datalist id="onboarding-currency-list">
+                  <option value="FCFA" />
+                  <option value="XAF" />
+                  <option value="XOF" />
+                  <option value="CFA" />
+                  <option value="MAD" />
+                  <option value="NGN" />
+                  <option value="GHS" />
+                  <option value="KES" />
+                  <option value="DZD" />
+                  <option value="TND" />
+                  <option value="EGP" />
+                  <option value="EUR" />
+                  <option value="€" />
+                  <option value="USD" />
+                  <option value="$" />
+                  <option value="GBP" />
+                  <option value="£" />
+                  <option value="CAD" />
+                </datalist>
+                <p className="text-[11px] text-slate-400 mt-1">Vous pourrez modifier la devise à tout moment dans les paramètres.</p>
               </div>
 
               <Button

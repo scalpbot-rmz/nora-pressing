@@ -9,10 +9,31 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Formate un montant avec la devise passée en paramètre */
+export function formatCurrency(amount: number | null | undefined, currency: string): string {
+  if (amount === null || amount === undefined || isNaN(amount)) return `0 ${currency}`;
+  const formatted = Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f');
+  return `${formatted}\u00a0${currency}`;
+}
+
+/**
+ * Rétrocompatible : lit la devise dans le localStorage (pressing.currency).
+ * Si non défini, utilise FCFA par défaut.
+ * Tous les composants qui importent formatFCFA bénéficient automatiquement
+ * du changement de devise sans aucune modification.
+ */
 export function formatFCFA(amount: number | null | undefined): string {
-  if (amount === null || amount === undefined || isNaN(amount)) return '0 FCFA';
-  const formatted = Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `${formatted} FCFA`;
+  let currency = 'FCFA';
+  try {
+    const raw = localStorage.getItem('nora_pressing_data');
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p?.currency) currency = p.currency;
+    }
+  } catch {
+    // localStorage indisponible (SSR) — on garde FCFA
+  }
+  return formatCurrency(amount, currency);
 }
 
 export function formatDateFR(dateString?: string | Date): string {

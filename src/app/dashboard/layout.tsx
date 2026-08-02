@@ -23,11 +23,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <ToastProvider>
       <div className="min-h-screen bg-[#f8fafc] flex">
-        <div className="flex-1 flex flex-col min-w-0 pb-20">
+        <div className="flex-1 flex flex-col min-w-0">
           <Header pressingName={pressing.name} phonePrimary={pressing.phone_primary} />
 
-          <main className="p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto animate-fade-up">
-            {children}
+          <main className="flex-1 overflow-y-auto pb-24 pt-2">
+            <div className="p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto animate-fade-up">
+              {children}
+            </div>
           </main>
         </div>
 

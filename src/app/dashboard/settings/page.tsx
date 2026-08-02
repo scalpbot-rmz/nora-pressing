@@ -36,7 +36,7 @@ export default function SettingsPage() {
   const [email, setEmail] = useState(pressing.email || 'contact@pressing.cm');
   const [address, setAddress] = useState(pressing.address);
   const [city, setCity] = useState(pressing.city || 'Douala');
-  const [currency] = useState(pressing.currency || 'FCFA');
+  const [currency, setCurrency] = useState(pressing.currency || 'FCFA');
   const [invoicePrefix, setInvoicePrefix] = useState(pressing.invoice_prefix || 'NOR');
   const [thankYouMessage, setThankYouMessage] = useState(
     pressing.thank_you_message || 'Merci pour votre confiance !'
@@ -189,14 +189,40 @@ export default function SettingsPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Devise Légale
+                  Devise monétaire
                 </label>
                 <input
                   type="text"
-                  disabled
-                  value={`${currency} (Franc CFA)`}
-                  className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-300 rounded-xl text-slate-700 font-bold text-sm"
+                  id="currency-input"
+                  list="currency-suggestions"
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  placeholder="ex: FCFA, XAF, €, $"
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-800 font-semibold text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB]"
                 />
+                <datalist id="currency-suggestions">
+                  <option value="FCFA" />
+                  <option value="XAF" />
+                  <option value="XOF" />
+                  <option value="CFA" />
+                  <option value="MAD" />
+                  <option value="NGN" />
+                  <option value="GHS" />
+                  <option value="KES" />
+                  <option value="TZS" />
+                  <option value="UGX" />
+                  <option value="DZD" />
+                  <option value="TND" />
+                  <option value="EGP" />
+                  <option value="EUR" />
+                  <option value="€" />
+                  <option value="USD" />
+                  <option value="$" />
+                  <option value="GBP" />
+                  <option value="£" />
+                  <option value="CAD" />
+                </datalist>
+                <p className="text-[11px] text-slate-400 mt-1">Saisissez librement votre devise. Sera appliquée à toute l’application.</p>
               </div>
             </div>
 
