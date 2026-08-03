@@ -144,13 +144,11 @@ export default function OffersPage() {
 
       {/* Modal Formulaire Offre */}
       {isOpenModal && (
-        /* L'overlay est scrollable — le modal n'est plus coupé en haut */
         <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm overflow-y-auto"
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm overflow-y-auto py-6 px-4"
           onClick={(e) => { if (e.target === e.currentTarget) setIsOpenModal(false); }}
         >
-          <div className="flex min-h-full items-start sm:items-center justify-center p-4 py-8">
-            <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-md w-full mx-auto shadow-2xl">
               {/* En-tête modal */}
               <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
                 <h2 className="text-lg font-bold text-slate-900">
@@ -229,8 +227,8 @@ export default function OffersPage() {
               </form>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
     </div>
   );
 }
