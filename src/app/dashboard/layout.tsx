@@ -22,16 +22,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-[#f8fafc] flex">
-        <div className="flex-1 flex flex-col min-w-0">
-          <Header pressingName={pressing.name} phonePrimary={pressing.phone_primary} />
+      {/*
+        Scroll naturel via le body — évite tout problème de positionnement fixed.
+        Le header est sticky (reste visible en haut).
+        La bottom nav est fixed (reste visible en bas).
+        Le main n'a pas overflow: hidden/auto pour ne pas piéger les modaux fixed.
+      */}
+      <div className="min-h-screen bg-[#f8fafc]">
+        <Header pressingName={pressing.name} phonePrimary={pressing.phone_primary} />
 
-          <main className="flex-1 overflow-y-auto pb-24 pt-2">
-            <div className="p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto animate-fade-up">
-              {children}
-            </div>
-          </main>
-        </div>
+        <main className="pb-28 pt-2">
+          <div className="p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto animate-fade-up">
+            {children}
+          </div>
+        </main>
 
         <BottomNav />
       </div>
