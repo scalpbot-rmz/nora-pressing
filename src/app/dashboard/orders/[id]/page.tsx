@@ -42,6 +42,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [partialPayment, setPartialPayment] = useState<number>(0);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const order = orders.find((o) => o.id === resolvedParams.id);
 
@@ -75,13 +77,31 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const isPaid = order.remaining_amount <= 0 || order.payment_status === 'paid';
 
   const handleDownload = async () => {
-    const pdfBytes = await generateInvoicePDF(order, pressing);
-    downloadPDF(pdfBytes, `Facture_${order.invoice_number}.pdf`);
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const pdfBytes = await generateInvoicePDF(order, pressing);
+      downloadPDF(pdfBytes, `Facture_${order.invoice_number}.pdf`);
+    } catch (err) {
+      console.error('Erreur génération PDF:', err);
+      alert('Impossible de générer le PDF. Vérifiez votre connexion et réessayez.');
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const handlePrint = async () => {
-    const pdfBytes = await generateInvoicePDF(order, pressing);
-    printPDF(pdfBytes);
+    if (isPrinting) return;
+    setIsPrinting(true);
+    try {
+      const pdfBytes = await generateInvoicePDF(order, pressing);
+      printPDF(pdfBytes);
+    } catch (err) {
+      console.error('Erreur impression PDF:', err);
+      alert('Impossible d’imprimer le PDF. Essayez de télécharger le fichier à la place.');
+    } finally {
+      setIsPrinting(false);
+    }
   };
 
   const handleWhatsApp = () => {
@@ -117,9 +137,23 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" onClick={handleDownload} className="gap-1.5 shadow-md">
-            <Download className="w-4 h-4" />
-            <span>Télécharger PDF</span>
+          <Button
+            variant="primary"
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className="gap-1.5 shadow-md"
+          >
+            {isDownloading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                <span>Génération...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                <span>Télécharger PDF</span>
+              </>
+            )}
           </Button>
 
           <Button variant="accent" onClick={handleWhatsApp} className="gap-1.5 shadow-md">
@@ -127,9 +161,23 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             <span>Partager WhatsApp</span>
           </Button>
 
-          <Button variant="outline" onClick={handlePrint} className="gap-1.5">
-            <Printer className="w-4 h-4" />
-            <span>Imprimer</span>
+          <Button
+            variant="outline"
+            onClick={handlePrint}
+            disabled={isPrinting}
+            className="gap-1.5"
+          >
+            {isPrinting ? (
+              <>
+                <span className="w-4 h-4 border-2 border-slate-400/40 border-t-slate-600 rounded-full animate-spin" />
+                <span>Préparation...</span>
+              </>
+            ) : (
+              <>
+                <Printer className="w-4 h-4" />
+                <span>Imprimer</span>
+              </>
+            )}
           </Button>
         </div>
       </div>

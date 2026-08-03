@@ -235,8 +235,13 @@ export default function DashboardPage() {
   const recentOrds = [...orders].sort((a, b) => ts(b.created_at) - ts(a.created_at)).slice(0, 6);
 
   const handleDownload = async (order: any) => {
-    const bytes = await generateInvoicePDF(order, pressing);
-    downloadPDF(bytes, `Facture_${order.invoice_number}.pdf`);
+    try {
+      const bytes = await generateInvoicePDF(order, pressing);
+      downloadPDF(bytes, `Facture_${order.invoice_number}.pdf`);
+    } catch (err) {
+      console.error('Erreur PDF:', err);
+      alert('Impossible de générer le PDF. Réessayez dans quelques instants.');
+    }
   };
 
   const fmtY = (v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v);
