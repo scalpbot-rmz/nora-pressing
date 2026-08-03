@@ -144,72 +144,90 @@ export default function OffersPage() {
 
       {/* Modal Formulaire Offre */}
       {isOpenModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <h2 className="text-lg font-bold text-slate-900">
-              {editingId ? 'Modifier l\'Offre' : 'Créer une Nouvelle Offre'}
-            </h2>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <Input
-                label="Nom de l'offre*"
-                placeholder="ex: Lavage + Repassage"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Type de facturation
-                </label>
-                <select
-                  value={billingType}
-                  onChange={(e) => setBillingType(e.target.value as BillingType)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-[#2563EB]"
+        /* L'overlay est scrollable — le modal n'est plus coupé en haut */
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm overflow-y-auto"
+          onClick={(e) => { if (e.target === e.currentTarget) setIsOpenModal(false); }}
+        >
+          <div className="flex min-h-full items-start sm:items-center justify-center p-4 py-8">
+            <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+              {/* En-tête modal */}
+              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
+                <h2 className="text-lg font-bold text-slate-900">
+                  {editingId ? "Modifier l'Offre" : 'Créer une Nouvelle Offre'}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsOpenModal(false)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                  aria-label="Fermer"
                 >
-                  <option value="kg">Au Kilogramme (kg)</option>
-                  <option value="unit">À l'Unité</option>
-                </select>
+                  ✕
+                </button>
               </div>
 
-              <Input
-                type="number"
-                label="Prix par défaut (FCFA)*"
-                value={defaultPrice}
-                onChange={(e) => setDefaultPrice(parseFloat(e.target.value) || 0)}
-                required
-              />
-
-              <Input
-                label="Délai estimé"
-                placeholder="ex: 24h, 48h, 12h VIP"
-                value={estimatedDelay}
-                onChange={(e) => setEstimatedDelay(e.target.value)}
-              />
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Détails du service..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#2563EB]"
+              {/* Corps scrollable si nécessaire */}
+              <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+                <Input
+                  label="Nom de l'offre*"
+                  placeholder="ex: Lavage + Repassage"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
                 />
-              </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button type="button" variant="ghost" onClick={() => setIsOpenModal(false)}>
-                  Annuler
-                </Button>
-                <Button type="submit" variant="secondary">
-                  Enregistrer
-                </Button>
-              </div>
-            </form>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Type de facturation
+                  </label>
+                  <select
+                    value={billingType}
+                    onChange={(e) => setBillingType(e.target.value as BillingType)}
+                    className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-[#2563EB]"
+                  >
+                    <option value="kg">Au Kilogramme (kg)</option>
+                    <option value="unit">À l&apos;Unité</option>
+                  </select>
+                </div>
+
+                <Input
+                  type="number"
+                  label="Prix par défaut*"
+                  value={defaultPrice}
+                  onChange={(e) => setDefaultPrice(parseFloat(e.target.value) || 0)}
+                  required
+                />
+
+                <Input
+                  label="Délai estimé"
+                  placeholder="ex: 24h, 48h, 12h VIP"
+                  value={estimatedDelay}
+                  onChange={(e) => setEstimatedDelay(e.target.value)}
+                />
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Description
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Détails du service..."
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#2563EB] resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <Button type="button" variant="ghost" onClick={() => setIsOpenModal(false)}>
+                    Annuler
+                  </Button>
+                  <Button type="submit" variant="secondary">
+                    Enregistrer
+                  </Button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
