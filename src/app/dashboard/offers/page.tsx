@@ -1,21 +1,156 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNoraStore } from '@/lib/store';
 import { formatFCFA } from '@/lib/utils';
 import { BillingType, Offer } from '@/types';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tag, PlusCircle, Trash2, Edit3, Clock, Sparkles } from 'lucide-react';
+import { Tag, PlusCircle, Trash2, Edit3, Clock } from 'lucide-react';
 
+// ─── Modal rendu via createPortal (s'échappe de tout contexte CSS) ───────────
+function OfferModal({
+  open,
+  editingId,
+  name, setName,
+  billingType, setBillingType,
+  defaultPrice, setDefaultPrice,
+  estimatedDelay, setEstimatedDelay,
+  description, setDescription,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  editingId: string | null;
+  name: string; setName: (v: string) => void;
+  billingType: BillingType; setBillingType: (v: BillingType) => void;
+  defaultPrice: number; setDefaultPrice: (v: number) => void;
+  estimatedDelay: string; setEstimatedDelay: (v: string) => void;
+  description: string; setDescription: (v: string) => void;
+  onClose: () => void;
+  onSubmit: (e: React.FormEvent) => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!open || !mounted) return null;
+
+  const modal = (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        backgroundColor: 'rgba(15,23,42,0.65)',
+        backdropFilter: 'blur(4px)',
+        overflowY: 'auto',
+        padding: '24px 16px',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        style={{
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          maxWidth: '480px',
+          width: '100%',
+          margin: '0 auto',
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* En-tête */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid #f1f5f9' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: 0 }}>
+            {editingId ? "Modifier l'Offre" : 'Créer une Nouvelle Offre'}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ padding: '6px', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#94a3b8', fontSize: '16px', lineHeight: 1 }}
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Formulaire */}
+        <form onSubmit={onSubmit} style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <Input
+            label="Nom de l'offre*"
+            placeholder="ex: Lavage + Repassage"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+
+          <div>
+            <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
+              Type de facturation
+            </label>
+            <select
+              value={billingType}
+              onChange={(e) => setBillingType(e.target.value as BillingType)}
+              style={{ width: '100%', padding: '10px 14px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '12px', fontSize: '14px', fontWeight: 500, outline: 'none' }}
+            >
+              <option value="kg">Au Kilogramme (kg)</option>
+              <option value="unit">À l&apos;Unité</option>
+            </select>
+          </div>
+
+          <Input
+            type="number"
+            label="Prix par défaut*"
+            value={defaultPrice}
+            onChange={(e) => setDefaultPrice(parseFloat(e.target.value) || 0)}
+            required
+          />
+
+          <Input
+            label="Délai estimé"
+            placeholder="ex: 24h, 48h, 12h VIP"
+            value={estimatedDelay}
+            onChange={(e) => setEstimatedDelay(e.target.value)}
+          />
+
+          <div>
+            <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
+              Description
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Détails du service..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              style={{ width: '100%', padding: '8px 14px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '12px', fontSize: '14px', resize: 'none', boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Annuler
+            </Button>
+            <Button type="submit" variant="secondary">
+              Enregistrer
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+
+  return createPortal(modal, document.body);
+}
+
+// ─── Page principale ──────────────────────────────────────────────────────────
 export default function OffersPage() {
   const { offers, addOffer, updateOffer, deleteOffer, isLoaded } = useNoraStore();
 
   const [isOpenModal, setIsOpenModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Form State
   const [name, setName] = useState('');
   const [billingType, setBillingType] = useState<BillingType>('kg');
   const [defaultPrice, setDefaultPrice] = useState<number>(1500);
@@ -75,7 +210,7 @@ export default function OffersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            Gestion des Offres & Tarifs
+            Gestion des Offres &amp; Tarifs
             <Tag className="w-6 h-6 text-[#16A34A]" />
           </h1>
           <p className="text-sm text-slate-500">
@@ -142,93 +277,18 @@ export default function OffersPage() {
         ))}
       </div>
 
-      {/* Modal Formulaire Offre */}
-      {isOpenModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm overflow-y-auto py-6 px-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setIsOpenModal(false); }}
-        >
-          <div className="bg-white rounded-2xl max-w-md w-full mx-auto shadow-2xl">
-              {/* En-tête modal */}
-              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
-                <h2 className="text-lg font-bold text-slate-900">
-                  {editingId ? "Modifier l'Offre" : 'Créer une Nouvelle Offre'}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setIsOpenModal(false)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                  aria-label="Fermer"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Corps scrollable si nécessaire */}
-              <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-                <Input
-                  label="Nom de l'offre*"
-                  placeholder="ex: Lavage + Repassage"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Type de facturation
-                  </label>
-                  <select
-                    value={billingType}
-                    onChange={(e) => setBillingType(e.target.value as BillingType)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-[#2563EB]"
-                  >
-                    <option value="kg">Au Kilogramme (kg)</option>
-                    <option value="unit">À l&apos;Unité</option>
-                  </select>
-                </div>
-
-                <Input
-                  type="number"
-                  label="Prix par défaut*"
-                  value={defaultPrice}
-                  onChange={(e) => setDefaultPrice(parseFloat(e.target.value) || 0)}
-                  required
-                />
-
-                <Input
-                  label="Délai estimé"
-                  placeholder="ex: 24h, 48h, 12h VIP"
-                  value={estimatedDelay}
-                  onChange={(e) => setEstimatedDelay(e.target.value)}
-                />
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Description
-                  </label>
-                  <textarea
-                    rows={3}
-                    placeholder="Détails du service..."
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-[#2563EB] resize-none"
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                  <Button type="button" variant="ghost" onClick={() => setIsOpenModal(false)}>
-                    Annuler
-                  </Button>
-                  <Button type="submit" variant="secondary">
-                    Enregistrer
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
+      {/* Modal via Portal — s'affiche toujours au-dessus de tout */}
+      <OfferModal
+        open={isOpenModal}
+        editingId={editingId}
+        name={name} setName={setName}
+        billingType={billingType} setBillingType={setBillingType}
+        defaultPrice={defaultPrice} setDefaultPrice={setDefaultPrice}
+        estimatedDelay={estimatedDelay} setEstimatedDelay={setEstimatedDelay}
+        description={description} setDescription={setDescription}
+        onClose={() => setIsOpenModal(false)}
+        onSubmit={handleSubmit}
+      />
     </div>
   );
 }
