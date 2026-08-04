@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Smartphone, Bell, Store, PhoneCall, Settings, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -13,11 +13,33 @@ interface HeaderProps {
 export function Header({ pressingName = 'Pressing Éclat Plus', phonePrimary = '+237 6 99 88 77 66' }: HeaderProps) {
   const [showNotifBanner, setShowNotifBanner] = useState(false);
 
+  /**
+   * PWA Desktop — Window Controls Overlay (WCO)
+   * Le manifest utilise "display_override": ["window-controls-overlay"].
+   * Sous Windows, les boutons système (réduire/agrandir/fermer) apparaissent
+   * dans la zone du header. On utilise env(titlebar-area-width) pour calculer
+   * le padding-right nécessaire afin que les boutons restent toujours visibles.
+   *
+   * En dehors de la PWA (navigateur normal), ces variables renvoient 100vw / auto,
+   * ce qui donne un padding-right de 0 → aucun impact sur l'affichage standard.
+   */
+  // Style WCO (Window Controls Overlay) — padding-right dynamique pour éviter
+  // le chevauchement avec les boutons Windows (réduire/agrandir/fermer).
+  // WebkitAppRegion est une propriété non-standard : on contourne TypeScript avec un cast.
+  const wcoStyle = {
+    paddingRight: 'max(16px, calc(100vw - env(titlebar-area-width, 100vw) + 16px))',
+    minHeight: 'env(titlebar-area-height, auto)',
+    ['WebkitAppRegion' as string]: 'drag',
+  } as React.CSSProperties;
+
   return (
     <>
-      <header className="bg-white border-b border-slate-200/80 px-4 py-3 sticky top-0 z-40 shadow-sm flex items-center justify-between">
-        {/* Brand Info */}
-        <div className="flex items-center gap-3">
+      <header
+        className="bg-white border-b border-slate-200/80 px-4 py-3 sticky top-0 z-40 shadow-sm flex items-center justify-between"
+        style={wcoStyle}
+      >
+        {/* Brand Info — zone de glissement (drag) */}
+        <div className="flex items-center gap-3" style={{ ['WebkitAppRegion' as string]: 'no-drag' } as React.CSSProperties}>
           <img src="/assets/logo.jpg" alt="Nora" className="w-8 h-8 rounded-lg object-cover shadow" />
           <div>
             <h2 className="font-bold text-slate-900 text-sm lg:text-base leading-tight flex items-center gap-1.5">
@@ -31,8 +53,11 @@ export function Header({ pressingName = 'Pressing Éclat Plus', phonePrimary = '
           </div>
         </div>
 
-        {/* Action Right */}
-        <div className="flex items-center gap-2">
+        {/* Actions droite — pas de drag, toujours cliquables */}
+        <div
+          className="flex items-center gap-2"
+          style={{ ['WebkitAppRegion' as string]: 'no-drag' } as React.CSSProperties}
+        >
           <Link href="/install">
             <Button variant="outline" size="sm" className="hidden sm:flex items-center gap-1.5 text-xs">
               <Smartphone className="w-3.5 h-3.5 text-[#2563EB]" />
@@ -40,8 +65,12 @@ export function Header({ pressingName = 'Pressing Éclat Plus', phonePrimary = '
             </Button>
           </Link>
 
-          {/* Settings button */}
-          <Link href="/dashboard/settings" className="p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors" title="Paramètres">
+          {/* Paramètres */}
+          <Link
+            href="/dashboard/settings"
+            className="p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors"
+            title="Paramètres"
+          >
             <Settings className="w-5 h-5" />
           </Link>
 

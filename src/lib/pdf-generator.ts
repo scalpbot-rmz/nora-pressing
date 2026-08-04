@@ -210,22 +210,46 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
   return await doc.save();
 }
 
-// ─── Télécharger (fiable sur tous les navigateurs et PWA) ──────────────────
+// ─── Télécharger — stratégie multi-navigateur garantie ────────────────────
 export function downloadPDF(pdfBytes: Uint8Array, fileName: string) {
   const blob = new Blob([pdfBytes as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
-  const url  = URL.createObjectURL(blob);
 
-  const a = document.createElement('a');
-  a.href     = url;
-  a.download = fileName;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  // Stratégie 1 : msSaveBlob (Edge Legacy / anciens navigateurs)
+  if ((navigator as any).msSaveBlob) {
+    (navigator as any).msSaveBlob(blob, fileName);
+    return;
+  }
 
-  // Attendre 10 s avant de révoquer — nécessaire sur mobile / PWA
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  // Stratégie 2 : anchor + createObjectURL (Chrome, Edge, Firefox — desktop et mobile)
+  if (typeof URL.createObjectURL === 'function') {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href        = url;
+    a.download    = fileName;
+    a.rel         = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Révoquer après 15 s (délai généreux pour mobile / PWA lents)
+    setTimeout(() => URL.revokeObjectURL(url), 15_000);
+    return;
+  }
+
+  // Stratégie 3 (fallback universel) : DataURL base64 — fonctionne même sans createObjectURL
+  const reader = new FileReader();
+  reader.onloadend = () => {
+    const a = document.createElement('a');
+    a.href        = reader.result as string;
+    a.download    = fileName;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+  reader.readAsDataURL(blob);
 }
+
 
 // ─── Imprimer (ouvre dans un onglet et déclenche l'impression) ────────────
 export function printPDF(pdfBytes: Uint8Array) {
