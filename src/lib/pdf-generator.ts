@@ -27,17 +27,20 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
   const bgGr  = rgb(240/255,253/255, 244/255);
   const bgRd  = rgb(254/255,242/255, 242/255);
 
-  const tx = (text: string, x: number, y: number, sz: number, f = font, c = navy) =>
-    page.drawText(String(text), { x, y, size: sz, font: f, color: c });
+  // Toujours convertir en string pour éviter les crashes sur null/undefined
+  const tx = (text: string | number | null | undefined, x: number, y: number, sz: number, f = font, c = navy) =>
+    page.drawText(String(text ?? ''), { x, y, size: sz, font: f, color: c });
 
-  const txC = (text: string, y: number, sz: number, f = font, c = navy) => {
-    const w = f.widthOfTextAtSize(String(text), sz);
-    page.drawText(String(text), { x: W/2 - w/2, y, size: sz, font: f, color: c });
+  const txC = (text: string | number | null | undefined, y: number, sz: number, f = font, c = navy) => {
+    const s = String(text ?? '');
+    const w = f.widthOfTextAtSize(s, sz);
+    page.drawText(s, { x: W/2 - w/2, y, size: sz, font: f, color: c });
   };
 
-  const txR = (text: string, rightX: number, y: number, sz: number, f = font, c = navy) => {
-    const w = f.widthOfTextAtSize(String(text), sz);
-    page.drawText(String(text), { x: rightX - w, y, size: sz, font: f, color: c });
+  const txR = (text: string | number | null | undefined, rightX: number, y: number, sz: number, f = font, c = navy) => {
+    const s = String(text ?? '');
+    const w = f.widthOfTextAtSize(s, sz);
+    page.drawText(s, { x: rightX - w, y, size: sz, font: f, color: c });
   };
 
   const hLine = (y: number, x1 = ML, x2 = MR, col = ltGr, th = 0.7) =>
@@ -180,12 +183,18 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
 
   // 5. QR CODE WHATSAPP
   try {
-    const phone = (pressing.phone_secondary || pressing.phone_primary).replace(/[^0-9]/g, '');
-    const msg   = encodeURIComponent(`Bonjour, ma commande ${order.invoice_number}`);
-    const url   = `https://wa.me/${phone}?text=${msg}`;
-    const qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 120 });
-    const qrBytes   = await fetch(qrDataUrl).then((r) => r.arrayBuffer());
-    const qrImg     = await doc.embedPng(qrBytes);
+    const phone = (pressing.phone_secondary || pressing.phone_primary || '').replace(/[^0-9]/g, '');
+    const msg   = encodeURIComponent(`Bonjour, ma commande ${order.invoice_number || ''}`);
+    const waUrl = `https://wa.me/${phone}?text=${msg}`;
+    const qrDataUrl = await QRCode.toDataURL(waUrl, { margin: 1, width: 120 });
+
+    // Décoder le base64 directement — PAS de fetch() sur data: URL (bloqué par CSP en PWA)
+    const b64Data = qrDataUrl.split(',')[1];
+    const binStr  = atob(b64Data);
+    const qrArr   = new Uint8Array(binStr.length);
+    for (let i = 0; i < binStr.length; i++) qrArr[i] = binStr.charCodeAt(i);
+    const qrImg   = await doc.embedPng(qrArr.buffer);
+
     const qrSize = 44;
     page.drawImage(qrImg, { x: W/2 - qrSize/2, y: y - qrSize, width: qrSize, height: qrSize });
     const scanTxt = 'Flasher pour contacter le pressing via WhatsApp';
@@ -193,6 +202,7 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
     tx(scanTxt, W/2 - scanW/2, y - qrSize - 10, 6, font, gray);
     y -= qrSize + 20;
   } catch {
+    // QR code optionnel — ne doit jamais bloquer la génération du PDF
     y -= 10;
   }
 
