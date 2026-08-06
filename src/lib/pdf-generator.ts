@@ -9,6 +9,21 @@ const H = 500;
 const ML = 20;
 const MR = W - 20;
 
+/**
+ * Nettoie une chaîne pour pdf-lib (Helvetica = WinAnsi uniquement).
+ * Remplace les caractères Unicode non supportés (espaces fines, NBSP, etc.)
+ * par des espaces ASCII normaux, et supprime tout caractère hors Latin-1.
+ */
+function sanitize(text: unknown): string {
+  return String(text ?? '')
+    .replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, ' ') // espaces Unicode → espace ASCII
+    .replace(/[\u2018\u2019]/g, "'")     // guillemets courbes → apostrophe ASCII
+    .replace(/[\u201c\u201d]/g, '"')     // guillemets courbes doubles
+    .replace(/[\u2013\u2014]/g, '-')     // tirets longs
+    .replace(/[\u2026]/g, '...')          // points de suspension
+    .replace(/[^\x00-\xFF]/g, '');        // supprime tout ce qui est hors Latin-1
+}
+
 export async function generateInvoicePDF(order: Order, pressing: Pressing): Promise<Uint8Array> {
   const doc  = await PDFDocument.create();
   const page = doc.addPage([W, H]);
@@ -27,18 +42,18 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
   const bgGr  = rgb(240/255,253/255, 244/255);
   const bgRd  = rgb(254/255,242/255, 242/255);
 
-  // Toujours convertir en string pour éviter les crashes sur null/undefined
-  const tx = (text: string | number | null | undefined, x: number, y: number, sz: number, f = font, c = navy) =>
-    page.drawText(String(text ?? ''), { x, y, size: sz, font: f, color: c });
+  // Helpers — sanitize() garantit que drawText ne crashe jamais
+  const tx = (text: unknown, x: number, y: number, sz: number, f = font, c = navy) =>
+    page.drawText(sanitize(text), { x, y, size: sz, font: f, color: c });
 
-  const txC = (text: string | number | null | undefined, y: number, sz: number, f = font, c = navy) => {
-    const s = String(text ?? '');
+  const txC = (text: unknown, y: number, sz: number, f = font, c = navy) => {
+    const s = sanitize(text);
     const w = f.widthOfTextAtSize(s, sz);
     page.drawText(s, { x: W/2 - w/2, y, size: sz, font: f, color: c });
   };
 
-  const txR = (text: string | number | null | undefined, rightX: number, y: number, sz: number, f = font, c = navy) => {
-    const s = String(text ?? '');
+  const txR = (text: unknown, rightX: number, y: number, sz: number, f = font, c = navy) => {
+    const s = sanitize(text);
     const w = f.widthOfTextAtSize(s, sz);
     page.drawText(s, { x: rightX - w, y, size: sz, font: f, color: c });
   };
@@ -70,7 +85,6 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
         const bin = atob(b64);
         imgBytes = new Uint8Array(bin.length).map((_, i) => bin.charCodeAt(i)).buffer;
       } else {
-        // Timeout de 3s pour éviter de bloquer en mode hors-ligne
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 3000);
         const resp = await fetch(targetLogoUrl, { signal: controller.signal });
@@ -85,17 +99,17 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
       page.drawImage(img, { x: ML, y: y - 24, width: 28, height: 28 });
       logoDrawn = true;
       tx((pressing.name || 'Nora Pressing').toUpperCase(), ML + 34, y - 6, 10, bold, navy);
-      tx(`Tel: ${pressing.phone_primary}${pressing.phone_secondary ? ' / ' + pressing.phone_secondary : ''}`, ML + 34, y - 18, 7, font, gray);
+      tx(`Tel: ${pressing.phone_primary || ''}${pressing.phone_secondary ? ' / ' + pressing.phone_secondary : ''}`, ML + 34, y - 18, 7, font, gray);
     } catch {
       logoDrawn = false;
     }
   }
   if (!logoDrawn) {
     tx((pressing.name || 'Nora Pressing').toUpperCase(), ML, y - 4, 10, bold, navy);
-    tx(`Tel: ${pressing.phone_primary}${pressing.phone_secondary ? ' / ' + pressing.phone_secondary : ''}`, ML, y - 16, 7, font, gray);
+    tx(`Tel: ${pressing.phone_primary || ''}${pressing.phone_secondary ? ' / ' + pressing.phone_secondary : ''}`, ML, y - 16, 7, font, gray);
   }
 
-  txR(`N° ${order.invoice_number}`, MR, y - 4, 8.5, bold, blue);
+  txR(`N. ${order.invoice_number || ''}`, MR, y - 4, 8.5, bold, blue);
   txR(`Le ${formatDateFR(order.created_at)}`, MR, y - 16, 7, font, gray);
   y -= 30;
 
@@ -111,7 +125,7 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
   // 2. BLOC CLIENT
   const clientLines: string[] = [];
   if (order.customer_name) clientLines.push(`Nom        : ${order.customer_name}`);
-  clientLines.push(`Telephone  : ${order.customer_phone}`);
+  clientLines.push(`Telephone  : ${order.customer_phone || ''}`);
   if (order.customer_address) clientLines.push(`Adresse    : ${order.customer_address}`);
 
   const clientBoxH = 14 + clientLines.length * 12;
@@ -126,8 +140,8 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
 
   // 3. TABLEAU PRESTATIONS
   page.drawRectangle({ x: ML, y: y - 14, width: W - ML*2, height: 16, color: rgb(241/255,245/255,249/255), borderColor: ltGr, borderWidth: 0.8 });
-  tx('DÉSIGNATION', ML + 6, y - 9, 6.5, bold, gray);
-  tx('QTÉ',        ML + 150, y - 9, 6.5, bold, gray);
+  tx('DESIGNATION', ML + 6, y - 9, 6.5, bold, gray);
+  tx('QTE',        ML + 150, y - 9, 6.5, bold, gray);
   txR('MONTANT',   MR - 2,   y - 9, 6.5, bold, gray);
   y -= 22;
 
@@ -188,7 +202,7 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
     const waUrl = `https://wa.me/${phone}?text=${msg}`;
     const qrDataUrl = await QRCode.toDataURL(waUrl, { margin: 1, width: 120 });
 
-    // Décoder le base64 directement — PAS de fetch() sur data: URL (bloqué par CSP en PWA)
+    // Décoder le base64 directement — PAS de fetch() sur data: URL
     const b64Data = qrDataUrl.split(',')[1];
     const binStr  = atob(b64Data);
     const qrArr   = new Uint8Array(binStr.length);
@@ -214,7 +228,7 @@ export async function generateInvoicePDF(order: Order, pressing: Pressing): Prom
   const thanks = pressing.thank_you_message || 'Merci de nous faire confiance !';
   txC(thanks, y, 8.5, bold, navy);
   y -= 12;
-  txC(`Service client : ${pressing.phone_secondary || pressing.phone_primary}`, y, 7, font, gray);
+  txC(`Service client : ${pressing.phone_secondary || pressing.phone_primary || ''}`, y, 7, font, gray);
   page.drawRectangle({ x: 0, y: 0, width: W, height: 4, color: blue });
 
   return await doc.save();
@@ -225,13 +239,13 @@ export function downloadPDF(pdfBytes: Uint8Array, fileName: string) {
   const blob = new Blob([pdfBytes as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 
   // Stratégie 1 : msSaveBlob (Edge Legacy / anciens navigateurs)
-  if ((navigator as any).msSaveBlob) {
+  if (typeof (navigator as any).msSaveBlob === 'function') {
     (navigator as any).msSaveBlob(blob, fileName);
     return;
   }
 
   // Stratégie 2 : anchor + createObjectURL (Chrome, Edge, Firefox — desktop et mobile)
-  if (typeof URL.createObjectURL === 'function') {
+  try {
     const url = URL.createObjectURL(blob);
     const a   = document.createElement('a');
     a.href        = url;
@@ -239,14 +253,20 @@ export function downloadPDF(pdfBytes: Uint8Array, fileName: string) {
     a.rel         = 'noopener';
     a.style.display = 'none';
     document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    // Révoquer après 15 s (délai généreux pour mobile / PWA lents)
-    setTimeout(() => URL.revokeObjectURL(url), 15_000);
+
+    // Déclencher le clic après un micro-délai (nécessaire pour Firefox et certaines PWA)
+    setTimeout(() => {
+      a.click();
+      document.body.removeChild(a);
+      // Révoquer après 15 s (délai généreux pour mobile / PWA lents)
+      setTimeout(() => URL.revokeObjectURL(url), 15_000);
+    }, 100);
     return;
+  } catch {
+    // createObjectURL indisponible — fallback ci-dessous
   }
 
-  // Stratégie 3 (fallback universel) : DataURL base64 — fonctionne même sans createObjectURL
+  // Stratégie 3 (fallback universel) : DataURL base64
   const reader = new FileReader();
   reader.onloadend = () => {
     const a = document.createElement('a');
@@ -260,23 +280,29 @@ export function downloadPDF(pdfBytes: Uint8Array, fileName: string) {
   reader.readAsDataURL(blob);
 }
 
-
 // ─── Imprimer (ouvre dans un onglet et déclenche l'impression) ────────────
 export function printPDF(pdfBytes: Uint8Array) {
   const blob = new Blob([pdfBytes as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
-  const url  = URL.createObjectURL(blob);
 
-  // Ouvrir dans un nouvel onglet — le navigateur gère l'impression nativement
+  let url: string;
+  try {
+    url = URL.createObjectURL(blob);
+  } catch {
+    // Si createObjectURL échoue, fallback au téléchargement
+    downloadPDF(pdfBytes, 'Facture.pdf');
+    return;
+  }
+
+  // Ouvrir dans un nouvel onglet
   const win = window.open(url, '_blank');
 
   if (win) {
-    // Attendre le chargement du PDF avant d'ouvrir la boîte d'impression
     win.addEventListener('load', () => {
       try {
         win.focus();
         win.print();
       } catch {
-        // Si le navigateur bloque l'impression auto, l'utilisateur peut imprimer manuellement
+        // L'utilisateur peut imprimer manuellement depuis l'onglet
       }
     });
   } else {
@@ -284,14 +310,14 @@ export function printPDF(pdfBytes: Uint8Array) {
     downloadPDF(pdfBytes, 'Facture.pdf');
   }
 
-  // Révoquer après 30 s
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  // Révoquer après 60 s (laisser le temps pour l'impression)
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // ─── WhatsApp ─────────────────────────────────────────────────────────────
 export function shareOnWhatsApp(order: Order, pressing: Pressing) {
   const isPaid   = order.remaining_amount <= 0 || order.payment_status === 'paid';
-  const phone    = order.customer_phone.replace(/[^0-9]/g, '');
+  const phone    = (order.customer_phone || '').replace(/[^0-9]/g, '');
   const pickup   = order.pickup_fee   || 0;
   const delivery = order.delivery_fee || 0;
 
