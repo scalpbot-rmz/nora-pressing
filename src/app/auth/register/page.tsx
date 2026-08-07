@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { registerUser, resendVerificationEmail } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Mail, CheckCircle2 } from 'lucide-react';
+import { Mail } from 'lucide-react';
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,29 +30,43 @@ export default function RegisterPage() {
       return;
     }
 
-    const res = await registerUser({
-      fullName: fullName.trim(),
-      email,
-      password,
-    });
+    try {
+      const res = await registerUser({
+        fullName: fullName.trim(),
+        email,
+        password,
+      });
 
-    setLoading(false);
-    if (res.success) {
-      setIsSuccess(true);
-    } else {
-      setError(res.error || "Erreur lors de l'inscription");
+      setLoading(false);
+      if (res.success) {
+        if (res.requiresVerification) {
+          setIsSuccess(true);
+        } else {
+          router.push('/dashboard');
+        }
+      } else {
+        setError(res.error || 'Erreur lors de l’inscription.');
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setError('Impossible de communiquer avec le serveur. Veuillez vérifier votre connexion.');
     }
   }
 
   async function handleResend() {
     setResending(true);
     setResendMsg(null);
-    const res = await resendVerificationEmail(email);
-    setResending(false);
-    if (res.success) {
-      setResendMsg('Un nouvel e-mail de confirmation vient de vous être envoyé !');
-    } else {
-      setResendMsg(res.error || 'Erreur lors du renvoi.');
+    try {
+      const res = await resendVerificationEmail(email);
+      setResending(false);
+      if (res.success) {
+        setResendMsg('Un nouvel e-mail de confirmation vient de vous être envoyé !');
+      } else {
+        setResendMsg(res.error || 'Erreur lors du renvoi.');
+      }
+    } catch {
+      setResending(false);
+      setResendMsg('Erreur lors du renvoi de l’e-mail.');
     }
   }
 
@@ -121,7 +137,7 @@ export default function RegisterPage() {
 
         {/* Erreurs */}
         {error && (
-          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-2.5 text-xs font-medium text-center">
+          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-3 text-xs font-medium text-center">
             {error}
           </div>
         )}
