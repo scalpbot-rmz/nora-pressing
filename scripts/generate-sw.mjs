@@ -1,4 +1,7 @@
+import fs from 'fs';
+import path from 'path';
 
+const swContent = `
 const CACHE_NAME = 'nora-pressing-v1';
 const STATIC_ASSETS = [
   '/',
@@ -81,3 +84,12 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+`;
+
+const publicDir = path.join(process.cwd(), 'public');
+if (!fs.existsSync(publicDir)) {
+  fs.mkdirSync(publicDir, { recursive: true });
+}
+
+fs.writeFileSync(path.join(publicDir, 'sw.js'), swContent);
+console.log('✅ Service Worker public/sw.js généré avec succès !');

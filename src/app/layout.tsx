@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import PwaRegistry from '@/components/pwa-registry';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { SyncProvider } from '@/contexts/SyncContext';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -39,8 +41,12 @@ export default function RootLayout({
         className="antialiased selection:bg-[#2563EB] selection:text-white"
         suppressHydrationWarning
       >
-        <PwaRegistry />
-        {children}
+        <AuthProvider>
+          <SyncProvider>
+            <PwaRegistry />
+            {children}
+          </SyncProvider>
+        </AuthProvider>
       </body>
     </html>
   );

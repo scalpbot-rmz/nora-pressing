@@ -1,80 +1,187 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Card, CardBody } from '@/components/ui/card';
+import { useRouter } from 'next/navigation';
+import { requestPasswordReset } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Sparkles, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { KeyRound, CheckCircle2 } from 'lucide-react';
 
 export default function ResetPasswordPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
-  const [isSent, setIsSent] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (email) {
-      setIsSent(true);
+  // Pour le cas où l'utilisateur revient via le lien du mail de réinitialisation
+  const [isUpdateMode, setIsUpdateMode] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [updateSuccess, setUpdateSuccess] = useState(false);
+
+  useEffect(() => {
+    // Détecter si on est dans un hash/session de réinitialisation
+    if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
+      setIsUpdateMode(true);
     }
-  };
+  }, []);
+
+  async function handleRequestReset(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    const res = await requestPasswordReset(email);
+    setLoading(false);
+
+    if (res.success) {
+      setSent(true);
+    } else {
+      setError(res.error || 'Erreur lors de l’envoi de l’e-mail de réinitialisation.');
+    }
+  }
+
+  async function handleUpdatePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      setError('Le mot de passe doit contenir au moins 6 caractères.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Les mots de passe ne correspondent pas.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateErr) throw updateErr;
+
+      setUpdateSuccess(true);
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de mettre à jour le mot de passe.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (isUpdateMode) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0F172A] px-4 py-8">
+        <form
+          onSubmit={handleUpdatePassword}
+          className="w-full max-w-md bg-slate-800/50 border border-slate-700/60 rounded-2xl p-8 space-y-6 shadow-2xl"
+        >
+          <div className="text-center space-y-1">
+            <div className="w-12 h-12 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center mx-auto border border-blue-500/30 mb-3">
+              <KeyRound className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl font-extrabold text-white">Nouveau mot de passe</h1>
+            <p className="text-sm text-slate-400">Définissez votre nouveau mot de passe sécurisé</p>
+          </div>
+
+          {error && (
+            <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-2.5 text-xs font-medium text-center">
+              {error}
+            </div>
+          )}
+
+          {updateSuccess ? (
+            <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl px-4 py-4 text-xs font-semibold text-center flex flex-col items-center gap-2">
+              <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+              <span>Mot de passe réinitialisé avec succès ! Redirection en cours...</span>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Nouveau mot de passe</label>
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Confirmer le mot de passe</label>
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <Button type="submit" variant="secondary" className="w-full font-bold py-3" disabled={loading}>
+                {loading ? 'Enregistrement…' : 'Enregistrer le nouveau mot de passe'}
+              </Button>
+            </div>
+          )}
+        </form>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-6">
-        <div className="text-center space-y-2">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#2563EB] to-[#16A34A] flex items-center justify-center font-black text-white text-2xl mx-auto shadow-xl ring-4 ring-slate-800">
-            N
-          </div>
-          <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center justify-center gap-1.5">
-            Réinitialisation du Mot de Passe
-          </h1>
+    <div className="min-h-screen flex items-center justify-center bg-[#0F172A] px-4 py-8">
+      <div className="w-full max-w-md bg-slate-800/50 border border-slate-700/60 rounded-2xl p-8 space-y-6 shadow-2xl text-center">
+        <div className="w-12 h-12 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center mx-auto border border-blue-500/30 mb-2">
+          <KeyRound className="w-6 h-6" />
         </div>
 
-        <Card className="shadow-2xl border-slate-800">
-          <CardBody className="p-6 space-y-6">
-            {isSent ? (
-              <div className="text-center space-y-4 py-4">
-                <CheckCircle2 className="w-12 h-12 text-[#16A34A] mx-auto" />
-                <h2 className="text-lg font-bold text-slate-900">Email envoyé !</h2>
-                <p className="text-xs text-slate-600">
-                  Un lien de réinitialisation a été envoyé à <strong>{email}</strong>. Veuillez consulter votre boîte de réception.
-                </p>
-                <Link href="/auth/login">
-                  <Button variant="outline" className="mt-4 gap-2 w-full">
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Retour à la connexion</span>
-                  </Button>
-                </Link>
-              </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <p className="text-xs text-slate-600">
-                  Saisissez l'adresse email associée à votre compte pressing pour recevoir les instructions de réinitialisation.
-                </p>
+        <h1 className="text-2xl font-extrabold text-white">Réinitialiser le mot de passe</h1>
 
-                <Input
-                  type="email"
-                  label="Adresse Email"
-                  placeholder="gerant@pressing.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
+        {error && (
+          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-2.5 text-xs font-medium text-center">
+            {error}
+          </div>
+        )}
 
-                <Button type="submit" variant="secondary" size="lg" className="w-full font-bold shadow-lg">
-                  Envoyer le Lien de Récupération
-                </Button>
+        {sent ? (
+          <div className="space-y-4">
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-semibold">
+              Si un compte existe avec l’adresse <strong className="text-white">{email}</strong>, un e-mail de réinitialisation sécurisé vient d’être envoyé.
+            </div>
+            <p className="text-xs text-slate-400">
+              Vérifiez vos boîtes de réception (et vos spams) puis cliquez sur le lien.
+            </p>
+          </div>
+        ) : (
+          <form onSubmit={handleRequestReset} className="space-y-4 text-left">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300">Adresse e-mail</label>
+              <Input
+                type="email"
+                placeholder="votre@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <Button type="submit" variant="secondary" className="w-full font-bold py-3" disabled={loading}>
+              {loading ? 'Envoi…' : 'Envoyer le lien de réinitialisation'}
+            </Button>
+          </form>
+        )}
 
-                <div className="pt-4 border-t border-slate-100 text-center">
-                  <Link href="/auth/login" className="text-xs text-slate-500 hover:text-slate-900 flex items-center justify-center gap-1.5 font-medium">
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>Retour à la connexion</span>
-                  </Link>
-                </div>
-              </form>
-            )}
-          </CardBody>
-        </Card>
+        <div className="pt-2">
+          <Link href="/auth/login" className="text-xs text-[#2563EB] font-bold hover:underline">
+            Retour à la connexion
+          </Link>
+        </div>
       </div>
     </div>
   );

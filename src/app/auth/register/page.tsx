@@ -1,178 +1,191 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Card, CardBody } from '@/components/ui/card';
+import { useState } from 'react';
+import { registerUser, resendVerificationEmail } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Sparkles, ArrowRight, User, Mail, Lock, AlertCircle } from 'lucide-react';
-import { registerUser } from '@/lib/auth';
+import { Mail, CheckCircle2 } from 'lucide-react';
 
 export default function RegisterPage() {
-  const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState<string | null>(null);
 
-  const handleRegister = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setLoading(true);
+    setError(null);
 
-    if (!fullName.trim()) {
-      setError('Veuillez saisir votre nom complet.');
-      return;
-    }
-    if (!email.trim()) {
-      setError('Veuillez saisir une adresse email validée.');
-      return;
-    }
-    if (password.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères.');
-      return;
-    }
-    if (password !== confirm) {
-      setError('Les mots de passe ne correspondent pas.');
+    if (fullName.trim().length < 2) {
+      setError('Le nom du pressing doit contenir au moins 2 caractères.');
+      setLoading(false);
       return;
     }
 
-    setIsLoading(true);
+    const res = await registerUser({
+      fullName: fullName.trim(),
+      email,
+      password,
+    });
 
-    try {
-      // Inscription réelle
-      const result = await registerUser({ fullName, email, password });
-
-      if (!result.success) {
-        setError(result.error || 'Erreur lors de la création du compte.');
-        setIsLoading(false);
-        return;
-      }
-
-      // Redirection vers l'onboarding pour la première configuration du pressing
-      router.push('/onboarding');
-      router.refresh();
-    } catch (err) {
-      setError('Une erreur est survenue lors de la création de votre compte.');
-      setIsLoading(false);
+    setLoading(false);
+    if (res.success) {
+      setIsSuccess(true);
+    } else {
+      setError(res.error || "Erreur lors de l'inscription");
     }
-  };
+  }
+
+  async function handleResend() {
+    setResending(true);
+    setResendMsg(null);
+    const res = await resendVerificationEmail(email);
+    setResending(false);
+    if (res.success) {
+      setResendMsg('Un nouvel e-mail de confirmation vient de vous être envoyé !');
+    } else {
+      setResendMsg(res.error || 'Erreur lors du renvoi.');
+    }
+  }
+
+  if (isSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0F172A] px-4 py-8">
+        <div className="w-full max-w-md bg-slate-800/50 border border-slate-700/60 rounded-2xl p-8 space-y-6 shadow-2xl text-center">
+          <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
+            <Mail className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <h1 className="text-2xl font-extrabold text-white">Vérification de votre e-mail</h1>
+            <p className="text-sm text-slate-300">
+              Un e-mail de confirmation a été envoyé à : <br />
+              <strong className="text-white">{email}</strong>
+            </p>
+          </div>
+
+          <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-2">
+            <p>
+              Veuillez cliquer sur le lien contenu dans l’e-mail pour activer votre compte et accéder à Nora Pressing.
+            </p>
+          </div>
+
+          {resendMsg && (
+            <p className="text-xs font-semibold text-emerald-400">{resendMsg}</p>
+          )}
+
+          <div className="space-y-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full text-slate-300 border-slate-700 hover:bg-slate-800"
+              onClick={handleResend}
+              disabled={resending}
+            >
+              {resending ? 'Renvoi en cours...' : 'Renvoyer l’e-mail de vérification'}
+            </Button>
+
+            <Link href="/auth/login" className="block text-xs text-[#2563EB] font-bold hover:underline">
+              Aller à la page de connexion
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 py-8">
-      <div className="max-w-md w-full space-y-6">
-        {/* Logo & Titre */}
-        <div className="text-center space-y-2">
-          <Link href="/">
-            <img
-              src="/assets/logo.jpg"
-              alt="Nora Logo"
-              className="w-16 h-16 rounded-2xl mx-auto shadow-xl ring-4 ring-slate-800 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-            />
-          </Link>
-          <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center justify-center gap-1.5">
-            Créer un Espace Nora <Sparkles className="w-4 h-4 text-[#16A34A]" />
+    <div className="min-h-screen flex items-center justify-center bg-[#0F172A] px-4 py-8">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-md bg-slate-800/50 border border-slate-700/60 rounded-2xl p-8 space-y-6 shadow-2xl"
+      >
+        {/* Header */}
+        <div className="text-center space-y-1">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#2563EB] to-[#16A34A] flex items-center justify-center text-white font-black text-xl mx-auto shadow-lg mb-3">
+            N
+          </div>
+          <h1 className="text-2xl font-extrabold text-white">
+            Créer un compte
           </h1>
           <p className="text-sm text-slate-400">
-            Inscrivez votre pressing et commencez à gérer vos commandes
+            Inscrivez votre pressing sur Nora
           </p>
         </div>
 
-        <Card className="shadow-2xl border-slate-800">
-          <CardBody className="p-6 space-y-5">
-            <h2 className="text-lg font-bold text-slate-900 text-center">Inscription Administrateur</h2>
+        {/* Erreurs */}
+        {error && (
+          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-2.5 text-xs font-medium text-center">
+            {error}
+          </div>
+        )}
 
-            {error && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl px-4 py-3 font-medium flex items-start gap-2.5">
-                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                <span>{error}</span>
-              </div>
-            )}
+        {/* Champs */}
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-300">
+              Nom du pressing
+            </label>
+            <Input
+              type="text"
+              placeholder="Pressing Excellence"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-300">
+              Adresse e-mail
+            </label>
+            <Input
+              type="email"
+              placeholder="votre@email.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-300">
+              Mot de passe
+            </label>
+            <Input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+          </div>
+        </div>
 
-            <form onSubmit={handleRegister} className="space-y-4">
-              <div className="relative">
-                <User className="w-4 h-4 absolute left-3.5 top-[38px] text-slate-400 pointer-events-none" />
-                <Input
-                  label="Nom Complet"
-                  placeholder="ex: M. Jean Dupont"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
+        <Button
+          type="submit"
+          variant="secondary"
+          className="w-full font-bold py-3"
+          disabled={loading}
+        >
+          {loading ? 'Inscription…' : 'Créer un compte'}
+        </Button>
 
-              <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3.5 top-[38px] text-slate-400 pointer-events-none" />
-                <Input
-                  type="email"
-                  label="Adresse Email"
-                  placeholder="gerant@pressing.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
-
-              <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3.5 top-[38px] text-slate-400 pointer-events-none" />
-                <Input
-                  type="password"
-                  label="Mot de passe"
-                  placeholder="••••••••  (min. 6 caractères)"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
-
-              <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3.5 top-[38px] text-slate-400 pointer-events-none" />
-                <Input
-                  type="password"
-                  label="Confirmer le mot de passe"
-                  placeholder="••••••••"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
-
-              <Button
-                type="submit"
-                variant="accent"
-                size="lg"
-                className="w-full gap-2 font-bold shadow-lg mt-2"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Création de votre espace...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Continuer vers l&apos;Onboarding</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </Button>
-            </form>
-
-            <div className="pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
-              Vous avez déjà un compte ?{' '}
-              <Link href="/auth/login" className="text-[#2563EB] font-bold hover:underline">
-                Se connecter
-              </Link>
-            </div>
-          </CardBody>
-        </Card>
-      </div>
+        <p className="text-center text-xs text-slate-400">
+          Déjà un compte ?{' '}
+          <Link
+            href="/auth/login"
+            className="text-[#2563EB] font-semibold hover:underline"
+          >
+            Se connecter
+          </Link>
+        </p>
+      </form>
     </div>
   );
 }

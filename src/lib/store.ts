@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Pressing, Offer, Customer, Order, Expense,
   TreatmentStatus, PaymentStatus,
@@ -9,70 +10,151 @@ import {
   initialPressing, initialOffers, initialCustomers,
   initialOrders, initialExpenses,
 } from './mock-data';
-
-const SK = {
-  PRESSING:  'nora_pressing_data',
-  OFFERS:    'nora_offers_data',
-  CUSTOMERS: 'nora_customers_data',
-  ORDERS:    'nora_orders_data',
-  EXPENSES:  'nora_expenses_data',
-};
+import { db, LocalPressing } from './db';
+import { syncEngine } from './sync-engine';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function useNoraStore() {
-  const [pressing,   setPressingState]   = useState<Pressing>(initialPressing);
-  const [offers,     setOffersState]     = useState<Offer[]>(initialOffers);
-  const [customers,  setCustomersState]  = useState<Customer[]>(initialCustomers);
-  const [orders,     setOrdersState]     = useState<Order[]>(initialOrders);
-  const [expenses,   setExpensesState]   = useState<Expense[]>(initialExpenses);
-  const [isLoaded,   setIsLoaded]        = useState(false);
+  const { user } = useAuth();
+  const userId = user?.id || 'guest';
 
+  // Live queries de Dexie pour un rafraîchissement réactif automatique
+  const dbPressing  = useLiveQuery(() => db.pressings.get(userId), [userId]);
+  const dbOffers    = useLiveQuery(() => db.offers.where({ deleted_at: null }).toArray(), []);
+  const dbCustomers = useLiveQuery(() => db.customers.where({ deleted_at: null }).toArray(), []);
+  const dbOrders    = useLiveQuery(() => db.orders.where({ deleted_at: null }).reverse().sortBy('created_at'), []);
+  const dbExpenses  = useLiveQuery(() => db.expenses.where({ deleted_at: null }).reverse().sortBy('created_at'), []);
+
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  // Initialisation et migration depuis localStorage au premier lancement si nécessaire
   useEffect(() => {
-    try {
-      const p  = localStorage.getItem(SK.PRESSING);
-      const of = localStorage.getItem(SK.OFFERS);
-      const cu = localStorage.getItem(SK.CUSTOMERS);
-      const or = localStorage.getItem(SK.ORDERS);
-      const ex = localStorage.getItem(SK.EXPENSES);
-      if (p)  setPressingState(JSON.parse(p));
-      if (of) setOffersState(JSON.parse(of));
-      if (cu) setCustomersState(JSON.parse(cu));
-      if (or) setOrdersState(JSON.parse(or));
-      if (ex) setExpensesState(JSON.parse(ex));
-    } catch (e) {
-      console.error('Erreur localStorage:', e);
-    } finally {
-      setIsLoaded(true);
+    async function initDB() {
+      try {
+        const existingPressing = await db.pressings.get(userId);
+        if (!existingPressing) {
+          // Migration localStorage -> IndexedDB
+          const legacyP = localStorage.getItem('nora_pressing_data');
+          const legacyOf = localStorage.getItem('nora_offers_data');
+          const legacyCu = localStorage.getItem('nora_customers_data');
+          const legacyOr = localStorage.getItem('nora_orders_data');
+          const legacyEx = localStorage.getItem('nora_expenses_data');
+
+          const pressingData: LocalPressing = legacyP
+            ? { ...JSON.parse(legacyP), id: userId, user_id: userId, _syncStatus: 'pending' }
+            : { ...initialPressing, id: userId, user_id: userId, name: user?.fullName || 'Mon Pressing', _syncStatus: 'pending' };
+
+          await db.pressings.put(pressingData);
+
+          if (legacyOf) {
+            const offers = JSON.parse(legacyOf).map((o: any) => ({ ...o, user_id: userId, _syncStatus: 'pending' }));
+            await db.offers.bulkPut(offers);
+          }
+          if (legacyCu) {
+            const customers = JSON.parse(legacyCu).map((c: any) => ({ ...c, user_id: userId, _syncStatus: 'pending' }));
+            await db.customers.bulkPut(customers);
+          }
+          if (legacyOr) {
+            const orders = JSON.parse(legacyOr).map((or: any) => ({ ...or, user_id: userId, _syncStatus: 'pending' }));
+            await db.orders.bulkPut(orders);
+          }
+          if (legacyEx) {
+            const expenses = JSON.parse(legacyEx).map((e: any) => ({ ...e, user_id: userId, _syncStatus: 'pending' }));
+            await db.expenses.bulkPut(expenses);
+          }
+        }
+      } catch (err) {
+        console.error('Erreur initialisation DB:', err);
+      } finally {
+        setIsLoaded(true);
+      }
     }
-  }, []);
+
+    initDB();
+  }, [userId, user?.fullName]);
+
+  // Fallbacks vers valeurs par défaut
+  const pressing: Pressing = dbPressing || {
+    ...initialPressing,
+    id: userId,
+    user_id: userId,
+    name: user?.fullName || 'Mon Pressing',
+  };
+
+  const offers: Offer[]       = dbOffers || initialOffers;
+  const customers: Customer[] = dbCustomers || initialCustomers;
+  const orders: Order[]       = dbOrders || initialOrders;
+  const expenses: Expense[]   = dbExpenses || initialExpenses;
+
+  // Helper pour déclencher la synchronisation après une écriture
+  const triggerSync = () => {
+    if (user?.id && navigator.onLine) {
+      syncEngine.syncAll(user.id);
+    }
+  };
 
   // ── Pressing ───────────────────────────────────────────────────────────
-  const updatePressing = (updated: Partial<Pressing>) => {
-    setPressingState((prev) => {
-      const next = { ...prev, ...updated };
-      localStorage.setItem(SK.PRESSING, JSON.stringify(next));
-      return next;
-    });
+  const updatePressing = async (updated: Partial<Pressing>) => {
+    const updatedRecord: LocalPressing = {
+      ...pressing,
+      ...updated,
+      id: userId,
+      user_id: userId,
+      updated_at: new Date().toISOString(),
+      _syncStatus: 'pending',
+    };
+
+    await db.pressings.put(updatedRecord);
+    triggerSync();
   };
 
   // ── Offres ─────────────────────────────────────────────────────────────
-  const addOffer = (data: Omit<Offer, 'id' | 'pressing_id' | 'created_at'>) => {
-    const offer: Offer = { ...data, id: `off-${Date.now()}`, pressing_id: pressing.id, created_at: new Date().toISOString() };
-    setOffersState((prev) => { const next = [offer, ...prev]; localStorage.setItem(SK.OFFERS, JSON.stringify(next)); return next; });
+  const addOffer = async (data: Omit<Offer, 'id' | 'pressing_id' | 'created_at'>) => {
+    const now = new Date().toISOString();
+    const offer: Offer = {
+      ...data,
+      id: `off-${Date.now()}`,
+      pressing_id: pressing.id,
+      created_at: now,
+    };
+
+    await db.offers.put({
+      ...offer,
+      user_id: userId,
+      updated_at: now,
+      _syncStatus: 'pending',
+    });
+    triggerSync();
     return offer;
   };
 
-  const updateOffer = (id: string, updated: Partial<Offer>) => {
-    setOffersState((prev) => { const next = prev.map((o) => o.id === id ? { ...o, ...updated } : o); localStorage.setItem(SK.OFFERS, JSON.stringify(next)); return next; });
+  const updateOffer = async (id: string, updated: Partial<Offer>) => {
+    const existing = await db.offers.get(id);
+    if (!existing) return;
+
+    await db.offers.update(id, {
+      ...updated,
+      updated_at: new Date().toISOString(),
+      _syncStatus: 'pending',
+    });
+    triggerSync();
   };
 
-  const deleteOffer = (id: string) => {
-    setOffersState((prev) => { const next = prev.filter((o) => o.id !== id); localStorage.setItem(SK.OFFERS, JSON.stringify(next)); return next; });
+  const deleteOffer = async (id: string) => {
+    await db.offers.update(id, {
+      deleted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      _syncStatus: 'deleted',
+    });
+    triggerSync();
   };
 
   // ── Clients ────────────────────────────────────────────────────────────
-  const addCustomer = (data: { name?: string; phone: string; address?: string }) => {
+  const addCustomer = async (data: { name?: string; phone: string; address?: string }) => {
     const existing = customers.find((c) => c.phone.trim() === data.phone.trim());
     if (existing) return existing;
+
+    const now = new Date().toISOString();
     const c: Customer = {
       id: `cust-${Date.now()}`,
       pressing_id: pressing.id,
@@ -81,38 +163,46 @@ export function useNoraStore() {
       address: data.address || '',
       total_spent: 0,
       orders_count: 0,
-      last_visit_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
+      last_visit_at: now,
+      created_at: now,
     };
-    setCustomersState((prev) => { const next = [c, ...prev]; localStorage.setItem(SK.CUSTOMERS, JSON.stringify(next)); return next; });
+
+    await db.customers.put({
+      ...c,
+      user_id: userId,
+      updated_at: now,
+      _syncStatus: 'pending',
+    });
+    triggerSync();
     return c;
   };
 
-  const updateCustomer = (id: string, data: Partial<Pick<Customer, 'name' | 'phone' | 'address'>>) => {
-    setCustomersState((prev) => {
-      const next = prev.map((c) => c.id === id ? { ...c, ...data } : c);
-      localStorage.setItem(SK.CUSTOMERS, JSON.stringify(next));
-      return next;
+  const updateCustomer = async (id: string, data: Partial<Pick<Customer, 'name' | 'phone' | 'address'>>) => {
+    await db.customers.update(id, {
+      ...data,
+      updated_at: new Date().toISOString(),
+      _syncStatus: 'pending',
     });
+    triggerSync();
   };
 
-  /** Supprime la fiche client. Les commandes sont conservées (intégrité des stats). */
-  const deleteCustomer = (id: string) => {
-    setCustomersState((prev) => {
-      const next = prev.filter((c) => c.id !== id);
-      localStorage.setItem(SK.CUSTOMERS, JSON.stringify(next));
-      return next;
+  const deleteCustomer = async (id: string) => {
+    await db.customers.update(id, {
+      deleted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      _syncStatus: 'deleted',
     });
+    triggerSync();
   };
 
   // ── Commandes ──────────────────────────────────────────────────────────
-  const addOrder = (orderData: Omit<Order, 'id' | 'pressing_id' | 'invoice_number' | 'created_at'>) => {
+  const addOrder = async (orderData: Omit<Order, 'id' | 'pressing_id' | 'invoice_number' | 'created_at'>) => {
     const prefix = pressing.invoice_prefix || 'NOR';
     const num    = `${prefix}-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`;
 
     let custId = orderData.customer_id;
     if (!custId && orderData.customer_phone) {
-      const c = addCustomer({ name: orderData.customer_name, phone: orderData.customer_phone, address: orderData.customer_address });
+      const c = await addCustomer({ name: orderData.customer_name, phone: orderData.customer_phone, address: orderData.customer_address });
       custId = c.id;
     }
 
@@ -124,6 +214,7 @@ export function useNoraStore() {
     const remaining      = Math.max(0, total_amount - amount_paid);
     const payment_status: PaymentStatus = remaining <= 0 ? 'paid' : 'unpaid';
 
+    const now = new Date().toISOString();
     const newOrder: Order = {
       ...orderData,
       id: `ord-${Date.now()}`,
@@ -137,68 +228,100 @@ export function useNoraStore() {
       amount_paid,
       remaining_amount: remaining,
       payment_status,
-      created_at: new Date().toISOString(),
+      created_at: now,
     };
 
-    setOrdersState((prev) => {
-      const next = [newOrder, ...prev];
-      localStorage.setItem(SK.ORDERS, JSON.stringify(next));
-      return next;
+    await db.orders.put({
+      ...newOrder,
+      user_id: userId,
+      updated_at: now,
+      _syncStatus: 'pending',
     });
 
     if (custId) {
-      setCustomersState((prev) => {
-        const next = prev.map((c) => c.id === custId
-          ? { ...c, total_spent: c.total_spent + total_amount, orders_count: c.orders_count + 1, last_visit_at: new Date().toISOString() }
-          : c
-        );
-        localStorage.setItem(SK.CUSTOMERS, JSON.stringify(next));
-        return next;
-      });
+      const cust = await db.customers.get(custId);
+      if (cust) {
+        await db.customers.update(custId, {
+          total_spent: (cust.total_spent || 0) + total_amount,
+          orders_count: (cust.orders_count || 0) + 1,
+          last_visit_at: now,
+          updated_at: now,
+          _syncStatus: 'pending',
+        });
+      }
     }
 
+    triggerSync();
     return newOrder;
   };
 
-  const updateOrderStatus = (id: string, treatment_status: TreatmentStatus) => {
-    setOrdersState((prev) => {
-      const next = prev.map((o) => o.id === id ? { ...o, treatment_status } : o);
-      localStorage.setItem(SK.ORDERS, JSON.stringify(next));
-      return next;
+  const updateOrderStatus = async (id: string, treatment_status: TreatmentStatus) => {
+    const now = new Date().toISOString();
+    await db.orders.update(id, {
+      treatment_status,
+      updated_at: now,
+      _syncStatus: 'pending',
     });
+    triggerSync();
   };
 
-  const updatePaymentStatus = (id: string, amountPaidInput?: number) => {
-    setOrdersState((prev) => {
-      const next = prev.map((o) => {
-        if (o.id !== id) return o;
-        const amount_paid      = amountPaidInput !== undefined ? amountPaidInput : o.total_amount;
-        const remaining_amount = Math.max(0, o.total_amount - amount_paid);
-        const payment_status: PaymentStatus = remaining_amount <= 0 ? 'paid' : 'unpaid';
-        return { ...o, amount_paid, remaining_amount, payment_status };
-      });
-      localStorage.setItem(SK.ORDERS, JSON.stringify(next));
-      return next;
+  const updatePaymentStatus = async (id: string, amountPaidInput?: number) => {
+    const order = await db.orders.get(id);
+    if (!order) return;
+
+    const amount_paid      = amountPaidInput !== undefined ? amountPaidInput : order.total_amount;
+    const remaining_amount = Math.max(0, order.total_amount - amount_paid);
+    const payment_status: PaymentStatus = remaining_amount <= 0 ? 'paid' : 'unpaid';
+
+    const now = new Date().toISOString();
+    await db.orders.update(id, {
+      amount_paid,
+      remaining_amount,
+      payment_status,
+      updated_at: now,
+      _syncStatus: 'pending',
     });
+    triggerSync();
   };
 
-  const deleteOrder = (id: string) => {
-    setOrdersState((prev) => {
-      const next = prev.filter((o) => o.id !== id);
-      localStorage.setItem(SK.ORDERS, JSON.stringify(next));
-      return next;
+  const deleteOrder = async (id: string) => {
+    const now = new Date().toISOString();
+    await db.orders.update(id, {
+      deleted_at: now,
+      updated_at: now,
+      _syncStatus: 'deleted',
     });
+    triggerSync();
   };
 
   // ── Dépenses ───────────────────────────────────────────────────────────
-  const addExpense = (data: Omit<Expense, 'id' | 'pressing_id' | 'created_at'>) => {
-    const e: Expense = { ...data, id: `exp-${Date.now()}`, pressing_id: pressing.id, created_at: new Date().toISOString() };
-    setExpensesState((prev) => { const next = [e, ...prev]; localStorage.setItem(SK.EXPENSES, JSON.stringify(next)); return next; });
+  const addExpense = async (data: Omit<Expense, 'id' | 'pressing_id' | 'created_at'>) => {
+    const now = new Date().toISOString();
+    const e: Expense = {
+      ...data,
+      id: `exp-${Date.now()}`,
+      pressing_id: pressing.id,
+      created_at: now,
+    };
+
+    await db.expenses.put({
+      ...e,
+      user_id: userId,
+      updated_at: now,
+      _syncStatus: 'pending',
+    });
+    triggerSync();
     return e;
   };
 
-  const deleteExpense = (id: string) => {
-    setExpensesState((prev) => { const next = prev.filter((e) => e.id !== id); localStorage.setItem(SK.EXPENSES, JSON.stringify(next)); return next; });
+  const deleteExpense = async (id: string) => {
+    const now = new Date().toISOString();
+    await db.expenses.update(id, {
+      deleted_at: now,
+      updated_at: now,
+      _syncStatus: 'deleted',
+    });
+    triggerSync();
   };
 
   return {

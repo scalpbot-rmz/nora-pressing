@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useNoraStore } from '@/lib/store';
 import { clearAuthSession } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/client';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +17,9 @@ import {
   Check,
   RotateCcw,
   LogOut,
+  KeyRound,
+  ShieldCheck,
+  AlertCircle,
 } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -29,12 +33,12 @@ export default function SettingsPage() {
     }
   };
 
-  const [name, setName] = useState(pressing.name);
+  const [name, setName] = useState(pressing.name || '');
   const [logoUrl, setLogoUrl] = useState(pressing.logo_url || '');
-  const [phonePrimary, setPhonePrimary] = useState(pressing.phone_primary);
+  const [phonePrimary, setPhonePrimary] = useState(pressing.phone_primary || '');
   const [phoneSecondary, setPhoneSecondary] = useState(pressing.phone_secondary || '');
-  const [email, setEmail] = useState(pressing.email || 'contact@pressing.cm');
-  const [address, setAddress] = useState(pressing.address);
+  const [email, setEmail] = useState(pressing.email || '');
+  const [address, setAddress] = useState(pressing.address || '');
   const [city, setCity] = useState(pressing.city || 'Douala');
   const [currency, setCurrency] = useState(pressing.currency || 'FCFA');
   const [invoicePrefix, setInvoicePrefix] = useState(pressing.invoice_prefix || 'NOR');
@@ -44,10 +48,36 @@ export default function SettingsPage() {
 
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  // Mot de passe state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [pwdSuccess, setPwdSuccess] = useState<string | null>(null);
+  const [pwdError, setPwdError] = useState<string | null>(null);
+
+  // Synchroniser les formulaires dès que `pressing` est chargé ou mis à jour
+  useEffect(() => {
+    if (isLoaded && pressing) {
+      setName(pressing.name || '');
+      setLogoUrl(pressing.logo_url || '');
+      setPhonePrimary(pressing.phone_primary || '');
+      setPhoneSecondary(pressing.phone_secondary || '');
+      setEmail(pressing.email || '');
+      setAddress(pressing.address || '');
+      setCity(pressing.city || 'Douala');
+      setCurrency(pressing.currency || 'FCFA');
+      setInvoicePrefix(pressing.invoice_prefix || 'NOR');
+      setThankYouMessage(pressing.thank_you_message || 'Merci pour votre confiance !');
+    }
+  }, [isLoaded, pressing]);
+
   if (!isLoaded) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Conserver STRICTEMENT le logo_url existant si l'utilisateur n'en a pas choisi un nouveau
     updatePressing({
       name,
       logo_url: logoUrl,
@@ -60,12 +90,70 @@ export default function SettingsPage() {
       invoice_prefix: invoicePrefix,
       thank_you_message: thankYouMessage,
     });
+
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError(null);
+    setPwdSuccess(null);
+
+    if (newPassword.length < 6) {
+      setPwdError('Le nouveau mot de passe doit contenir au moins 6 caractères.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPwdError('Les mots de passe ne correspondent pas.');
+      return;
+    }
+
+    setPwdLoading(true);
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user?.email) {
+        throw new Error('Utilisateur non identifié');
+      }
+
+      // Vérifier le mot de passe actuel en tentant une ré-authentification
+      const { error: verifyErr } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (verifyErr) {
+        setPwdError('Le mot de passe actuel est incorrect.');
+        setPwdLoading(false);
+        return;
+      }
+
+      // Mettre à jour le mot de passe
+      const { error: updateErr } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateErr) throw updateErr;
+
+      setPwdSuccess('Mot de passe modifié avec succès !');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setPwdError(err.message || 'Erreur lors de la modification du mot de passe.');
+    } finally {
+      setPwdLoading(false);
+    }
+  };
+
   const handleReset = () => {
-    if (confirm('Réinitialiser les paramètres par défaut du pressing ?')) {
+    if (confirm('Réinitialiser les paramètres par défaut du pressing ? (Le logo sera conservé)')) {
       setName('Pressing Éclat Plus');
       setPhonePrimary('+237 6 99 88 77 66');
       setPhoneSecondary('+237 6 77 11 22 33');
@@ -85,7 +173,7 @@ export default function SettingsPage() {
           <Settings className="w-6 h-6 text-[#2563EB]" />
         </h1>
         <p className="text-sm text-slate-500">
-          Configuration générale, identité visuelle, contacts et personnalisation des factures PDF
+          Configuration générale, identité visuelle, contacts, sécurité et personnalisation des factures PDF
         </p>
       </div>
 
@@ -208,21 +296,12 @@ export default function SettingsPage() {
                   <option value="MAD" />
                   <option value="NGN" />
                   <option value="GHS" />
-                  <option value="KES" />
-                  <option value="TZS" />
-                  <option value="UGX" />
-                  <option value="DZD" />
-                  <option value="TND" />
-                  <option value="EGP" />
                   <option value="EUR" />
-                  <option value="€" />
                   <option value="USD" />
-                  <option value="$" />
-                  <option value="GBP" />
-                  <option value="£" />
-                  <option value="CAD" />
                 </datalist>
-                <p className="text-[11px] text-slate-400 mt-1">Saisissez librement votre devise. Sera appliquée à toute l’application.</p>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Saisissez librement votre devise. Sera appliquée à toute l’application.
+                </p>
               </div>
             </div>
 
@@ -252,6 +331,65 @@ export default function SettingsPage() {
         </div>
       </form>
 
+      {/* SECTION SÉCURITÉ DU COMPTE (MODIFICATION DE MOT DE PASSE) */}
+      <Card>
+        <CardHeader className="bg-slate-50/70 border-b border-slate-100 flex items-center gap-2">
+          <ShieldCheck className="w-5 h-5 text-blue-600" />
+          <h2 className="text-base font-bold text-slate-900">Sécurité & Mot de Passe</h2>
+        </CardHeader>
+        <CardBody>
+          <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
+            {pwdSuccess && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>{pwdSuccess}</span>
+              </div>
+            )}
+
+            {pwdError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600" />
+                <span>{pwdError}</span>
+              </div>
+            )}
+
+            <Input
+              type="password"
+              label="Mot de passe actuel*"
+              placeholder="••••••••"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+            />
+
+            <Input
+              type="password"
+              label="Nouveau mot de passe*"
+              placeholder="••••••••"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+
+            <Input
+              type="password"
+              label="Confirmer le nouveau mot de passe*"
+              placeholder="••••••••"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+
+            <Button type="submit" variant="outline" className="gap-2 text-slate-700 font-bold border-slate-300" disabled={pwdLoading}>
+              <KeyRound className="w-4 h-4" />
+              {pwdLoading ? 'Modification...' : 'Changer mon mot de passe'}
+            </Button>
+          </form>
+        </CardBody>
+      </Card>
+
       {/* SECTION DÉCONNEXION */}
       <div className="border-t border-slate-200 pt-6">
         <Card className="border-rose-100 bg-rose-50/30">
@@ -261,7 +399,7 @@ export default function SettingsPage() {
           </CardHeader>
           <CardBody className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <p className="text-sm text-slate-600">
-              Fermez votre session en toute sécurité. Vous devrez vous reconnecter pour accéder au tableau de bord.
+              Fermez votre session en toute sécurité. Vos données synchronisées resteront accessibles sur tous vos appareils.
             </p>
             <Button
               type="button"
