@@ -1,6 +1,5 @@
 'use client';
 
-import { useSync } from '@/contexts/AuthContext'; // On va utiliser SyncContext
 import { useSyncContext } from '@/contexts/SyncContext';
 import { WifiOff, RefreshCw, CheckCircle2, CloudUpload } from 'lucide-react';
 import { useState, useEffect } from 'react';
