@@ -18,7 +18,12 @@ export default function AuthCallbackPage() {
         if (error) throw error;
 
         if (session?.user) {
-          setAuthSession(session.user.id, session.user.email || '');
+          setAuthSession({
+            id: session.user.id,
+            email: session.user.email || '',
+            fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || 'Gérant',
+            emailConfirmed: !!session.user.email_confirmed_at,
+          });
           setMessage('Authentification réussie ! Redirection...');
           setTimeout(() => {
             router.push('/dashboard');
