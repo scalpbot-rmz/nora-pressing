@@ -115,10 +115,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useSync() {
+export function useSyncContext() {
   const context = useContext(SyncContext);
   if (!context) {
-    throw new Error('useSync must be used within a SyncProvider');
+    throw new Error('useSyncContext must be used within a SyncProvider');
   }
   return context;
 }

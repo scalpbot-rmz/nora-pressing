@@ -2,6 +2,7 @@ import Dexie, { Table } from 'dexie';
 import { Pressing, Offer, Customer, Order, Expense } from '@/types';
 
 export type SyncStatus = 'synced' | 'pending' | 'deleted';
+export type TableName = 'pressings' | 'offers' | 'customers' | 'orders' | 'expenses';
 
 export interface LocalRecord {
   _syncStatus?: SyncStatus;

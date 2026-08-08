@@ -7,116 +7,146 @@ import {
 } from '@/types';
 import { initialPressing, initialOffers, initialCustomers, initialOrders, initialExpenses } from './mock-data';
 import { useAuth } from '@/contexts/AuthContext';
+import { db, LocalPressing, LocalOffer, LocalCustomer, LocalOrder, LocalExpense } from './db';
+import { syncEngine } from './sync-engine';
 
-// ─── Clés de stockage ────────────────────────────────────────────────────────
-function keys(userId: string) {
-  return {
-    pressing:  `nora_pressing_${userId}`,
-    offers:    `nora_offers_${userId}`,
-    customers: `nora_customers_${userId}`,
-    orders:    `nora_orders_${userId}`,
-    expenses:  `nora_expenses_${userId}`,
-  };
-}
-
-function load<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function save(key: string, value: unknown) {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-
-// ─── Hook principal ──────────────────────────────────────────────────────────
 export function useNoraStore() {
   const { user } = useAuth();
   const userId = user?.id || 'guest';
-  const k = keys(userId);
 
-  const [isLoaded, setIsLoaded]       = useState(false);
-  const [pressing, setPressing]       = useState<Pressing>({ ...initialPressing, id: userId, user_id: userId });
-  const [offers, setOffers]           = useState<Offer[]>(initialOffers);
-  const [customers, setCustomers]     = useState<Customer[]>(initialCustomers);
-  const [orders, setOrders]           = useState<Order[]>(initialOrders);
-  const [expenses, setExpenses]       = useState<Expense[]>(initialExpenses);
+  const [isLoaded, setIsLoaded]   = useState(false);
+  const [pressing, setPressing]   = useState<Pressing>({ ...initialPressing, id: userId, user_id: userId });
+  const [offers, setOffers]       = useState<Offer[]>(initialOffers);
+  const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
+  const [orders, setOrders]       = useState<Order[]>(initialOrders);
+  const [expenses, setExpenses]   = useState<Expense[]>(initialExpenses);
 
-  // Chargement depuis localStorage (immédiat, pas d'async, pas d'IndexedDB)
-  useEffect(() => {
-    if (!userId || userId === 'guest') return;
+  // Fonction de rechargement des données depuis IndexedDB
+  const reloadFromDB = useCallback(async () => {
+    if (!userId || userId === 'guest') {
+      setIsLoaded(true);
+      return;
+    }
 
-    const p = load<Pressing>(k.pressing, { ...initialPressing, id: userId, user_id: userId, name: user?.fullName || 'Mon Pressing' });
-    const of = load<Offer[]>(k.offers, []);
-    const cu = load<Customer[]>(k.customers, []);
-    const or = load<Order[]>(k.orders, []);
-    const ex = load<Expense[]>(k.expenses, []);
+    try {
+      // 1. Pressing
+      let dbP = await db.pressings.get(userId);
+      if (!dbP) {
+        dbP = { ...initialPressing, id: userId, user_id: userId, name: user?.fullName || 'Mon Pressing', _syncStatus: 'pending' };
+        await db.pressings.put(dbP);
+      }
+      setPressing(dbP);
 
-    setPressing(p);
-    setOffers(of);
-    setCustomers(cu);
-    setOrders(or);
-    setExpenses(ex);
-    setIsLoaded(true);
+      // 2. Offres
+      const dbOf = await db.offers.filter(o => !o.deleted_at).toArray();
+      setOffers(dbOf);
+
+      // 3. Clients
+      const dbCu = await db.customers.filter(c => !c.deleted_at).toArray();
+      setCustomers(dbCu);
+
+      // 4. Commandes
+      const dbOr = await db.orders.filter(o => !o.deleted_at).toArray();
+      dbOr.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setOrders(dbOr);
+
+      // 5. Dépenses
+      const dbEx = await db.expenses.filter(e => !e.deleted_at).toArray();
+      dbEx.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setExpenses(dbEx);
+
+    } catch (err) {
+      console.warn('[useNoraStore] Erreur lecture DB:', err);
+    } finally {
+      setIsLoaded(true);
+    }
   }, [userId, user?.fullName]);
 
-  // Pour guest (non connecté) on marque aussi comme chargé
+  // Chargement initial + Écouteur d'événements de synchronisation temps réel
   useEffect(() => {
-    if (userId === 'guest') setIsLoaded(true);
-  }, [userId]);
+    reloadFromDB();
+
+    const handleDBChange = () => {
+      reloadFromDB();
+    };
+
+    window.addEventListener('nora-db-change', handleDBChange);
+    return () => {
+      window.removeEventListener('nora-db-change', handleDBChange);
+    };
+  }, [reloadFromDB]);
+
+  // Déclencher la synchronisation après une modification locale
+  const triggerSync = useCallback(() => {
+    syncEngine.notifyListeners();
+    if (user?.id && typeof navigator !== 'undefined' && navigator.onLine) {
+      syncEngine.syncAll(user.id).catch(console.warn);
+    }
+  }, [user?.id]);
 
   // ── Pressing ──────────────────────────────────────────────────────────────
-  const updatePressing = useCallback((updated: Partial<Pressing>) => {
-    setPressing(prev => {
-      const next = { ...prev, ...updated, id: userId, user_id: userId, updated_at: new Date().toISOString() };
-      save(k.pressing, next);
-      return next;
-    });
-  }, [userId, k.pressing]);
+  const updatePressing = useCallback(async (updated: Partial<Pressing>) => {
+    const updatedRecord: LocalPressing = {
+      ...pressing,
+      ...updated,
+      id: userId,
+      user_id: userId,
+      updated_at: new Date().toISOString(),
+      _syncStatus: 'pending',
+    };
+    // Protection logo : si pas de logo dans updated et présent dans pressing, le garder
+    if (!updated.logo_url && pressing.logo_url) {
+      updatedRecord.logo_url = pressing.logo_url;
+    }
+
+    setPressing(updatedRecord);
+    await db.pressings.put(updatedRecord);
+    triggerSync();
+  }, [pressing, userId, triggerSync]);
 
   // ── Offres ────────────────────────────────────────────────────────────────
-  const addOffer = useCallback((data: Omit<Offer, 'id' | 'pressing_id' | 'created_at'>) => {
-    const offer: Offer = { ...data, id: `off-${Date.now()}`, pressing_id: userId, created_at: new Date().toISOString() };
-    setOffers(prev => {
-      const next = [...prev, offer];
-      save(k.offers, next);
-      return next;
-    });
+  const addOffer = useCallback(async (data: Omit<Offer, 'id' | 'pressing_id' | 'created_at'>) => {
+    const now = new Date().toISOString();
+    const offer: LocalOffer = {
+      ...data,
+      id: `off-${Date.now()}`,
+      pressing_id: userId,
+      user_id: userId,
+      created_at: now,
+      updated_at: now,
+      _syncStatus: 'pending',
+    };
+
+    setOffers(prev => [...prev, offer]);
+    await db.offers.put(offer);
+    triggerSync();
     return offer;
-  }, [userId, k.offers]);
+  }, [userId, triggerSync]);
 
-  const updateOffer = useCallback((id: string, updated: Partial<Offer>) => {
-    setOffers(prev => {
-      const next = prev.map(o => o.id === id ? { ...o, ...updated } : o);
-      save(k.offers, next);
-      return next;
-    });
-  }, [k.offers]);
+  const updateOffer = useCallback(async (id: string, updated: Partial<Offer>) => {
+    const now = new Date().toISOString();
+    setOffers(prev => prev.map(o => o.id === id ? { ...o, ...updated } : o));
+    await db.offers.update(id, { ...updated, updated_at: now, _syncStatus: 'pending' });
+    triggerSync();
+  }, [triggerSync]);
 
-  const deleteOffer = useCallback((id: string) => {
-    setOffers(prev => {
-      const next = prev.filter(o => o.id !== id);
-      save(k.offers, next);
-      return next;
-    });
-  }, [k.offers]);
+  const deleteOffer = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    setOffers(prev => prev.filter(o => o.id !== id));
+    await db.offers.update(id, { deleted_at: now, updated_at: now, _syncStatus: 'deleted' });
+    triggerSync();
+  }, [triggerSync]);
 
   // ── Clients ───────────────────────────────────────────────────────────────
-  const addCustomer = useCallback((data: { name?: string; phone: string; address?: string }) => {
+  const addCustomer = useCallback(async (data: { name?: string; phone: string; address?: string }) => {
     const existing = customers.find(c => c.phone.trim() === data.phone.trim());
     if (existing) return existing;
 
     const now = new Date().toISOString();
-    const c: Customer = {
+    const c: LocalCustomer = {
       id: `cust-${Date.now()}`,
       pressing_id: userId,
+      user_id: userId,
       name: data.name || 'Client',
       phone: data.phone,
       address: data.address || '',
@@ -124,39 +154,38 @@ export function useNoraStore() {
       orders_count: 0,
       last_visit_at: now,
       created_at: now,
+      updated_at: now,
+      _syncStatus: 'pending',
     };
-    setCustomers(prev => {
-      const next = [...prev, c];
-      save(k.customers, next);
-      return next;
-    });
+
+    setCustomers(prev => [...prev, c]);
+    await db.customers.put(c);
+    triggerSync();
     return c;
-  }, [customers, userId, k.customers]);
+  }, [customers, userId, triggerSync]);
 
-  const updateCustomer = useCallback((id: string, data: Partial<Pick<Customer, 'name' | 'phone' | 'address'>>) => {
-    setCustomers(prev => {
-      const next = prev.map(c => c.id === id ? { ...c, ...data } : c);
-      save(k.customers, next);
-      return next;
-    });
-  }, [k.customers]);
+  const updateCustomer = useCallback(async (id: string, data: Partial<Pick<Customer, 'name' | 'phone' | 'address'>>) => {
+    const now = new Date().toISOString();
+    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...data } : c));
+    await db.customers.update(id, { ...data, updated_at: now, _syncStatus: 'pending' });
+    triggerSync();
+  }, [triggerSync]);
 
-  const deleteCustomer = useCallback((id: string) => {
-    setCustomers(prev => {
-      const next = prev.filter(c => c.id !== id);
-      save(k.customers, next);
-      return next;
-    });
-  }, [k.customers]);
+  const deleteCustomer = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    setCustomers(prev => prev.filter(c => c.id !== id));
+    await db.customers.update(id, { deleted_at: now, updated_at: now, _syncStatus: 'deleted' });
+    triggerSync();
+  }, [triggerSync]);
 
   // ── Commandes ─────────────────────────────────────────────────────────────
-  const addOrder = useCallback((orderData: Omit<Order, 'id' | 'pressing_id' | 'invoice_number' | 'created_at'>) => {
+  const addOrder = useCallback(async (orderData: Omit<Order, 'id' | 'pressing_id' | 'invoice_number' | 'created_at'>) => {
     const prefix = pressing.invoice_prefix || 'NOR';
     const num    = `${prefix}-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`;
 
     let custId = orderData.customer_id;
     if (!custId && orderData.customer_phone) {
-      const c = addCustomer({ name: orderData.customer_name, phone: orderData.customer_phone, address: orderData.customer_address });
+      const c = await addCustomer({ name: orderData.customer_name, phone: orderData.customer_phone, address: orderData.customer_address });
       custId = c.id;
     }
 
@@ -169,10 +198,11 @@ export function useNoraStore() {
     const payment_status: PaymentStatus = remaining <= 0 ? 'paid' : 'unpaid';
 
     const now = new Date().toISOString();
-    const newOrder: Order = {
+    const newOrder: LocalOrder = {
       ...orderData,
       id: `ord-${Date.now()}`,
       pressing_id: userId,
+      user_id: userId,
       customer_id: custId,
       invoice_number: num,
       gross_amount: gross,
@@ -183,78 +213,84 @@ export function useNoraStore() {
       remaining_amount: remaining,
       payment_status,
       created_at: now,
+      updated_at: now,
+      _syncStatus: 'pending',
     };
 
-    setOrders(prev => {
-      const next = [newOrder, ...prev];
-      save(k.orders, next);
-      return next;
-    });
+    setOrders(prev => [newOrder, ...prev]);
+    await db.orders.put(newOrder);
 
-    // Mettre à jour le client
+    // Mettre à jour le client en DB
     if (custId) {
-      setCustomers(prev => {
-        const next = prev.map(c =>
-          c.id === custId
-            ? { ...c, total_spent: c.total_spent + total_amount, orders_count: c.orders_count + 1, last_visit_at: now }
-            : c
-        );
-        save(k.customers, next);
-        return next;
-      });
+      const cust = await db.customers.get(custId);
+      if (cust) {
+        await db.customers.update(custId, {
+          total_spent: (cust.total_spent || 0) + total_amount,
+          orders_count: (cust.orders_count || 0) + 1,
+          last_visit_at: now,
+          updated_at: now,
+          _syncStatus: 'pending',
+        });
+      }
     }
 
+    triggerSync();
     return newOrder;
-  }, [pressing, orders, userId, k.orders, k.customers, addCustomer]);
+  }, [pressing, orders.length, userId, addCustomer, triggerSync]);
 
-  const updateOrderStatus = useCallback((id: string, treatment_status: TreatmentStatus) => {
-    setOrders(prev => {
-      const next = prev.map(o => o.id === id ? { ...o, treatment_status } : o);
-      save(k.orders, next);
-      return next;
-    });
-  }, [k.orders]);
+  const updateOrderStatus = useCallback(async (id: string, treatment_status: TreatmentStatus) => {
+    const now = new Date().toISOString();
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, treatment_status } : o));
+    await db.orders.update(id, { treatment_status, updated_at: now, _syncStatus: 'pending' });
+    triggerSync();
+  }, [triggerSync]);
 
-  const updatePaymentStatus = useCallback((id: string, amountPaidInput?: number) => {
-    setOrders(prev => {
-      const next = prev.map(o => {
-        if (o.id !== id) return o;
-        const amount_paid      = amountPaidInput !== undefined ? amountPaidInput : o.total_amount;
-        const remaining_amount = Math.max(0, o.total_amount - amount_paid);
-        const payment_status: PaymentStatus = remaining_amount <= 0 ? 'paid' : 'unpaid';
-        return { ...o, amount_paid, remaining_amount, payment_status };
-      });
-      save(k.orders, next);
-      return next;
-    });
-  }, [k.orders]);
+  const updatePaymentStatus = useCallback(async (id: string, amountPaidInput?: number) => {
+    const order = await db.orders.get(id);
+    if (!order) return;
 
-  const deleteOrder = useCallback((id: string) => {
-    setOrders(prev => {
-      const next = prev.filter(o => o.id !== id);
-      save(k.orders, next);
-      return next;
-    });
-  }, [k.orders]);
+    const amount_paid      = amountPaidInput !== undefined ? amountPaidInput : order.total_amount;
+    const remaining_amount = Math.max(0, order.total_amount - amount_paid);
+    const payment_status: PaymentStatus = remaining_amount <= 0 ? 'paid' : 'unpaid';
+    const now = new Date().toISOString();
+
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, amount_paid, remaining_amount, payment_status } : o));
+    await db.orders.update(id, { amount_paid, remaining_amount, payment_status, updated_at: now, _syncStatus: 'pending' });
+    triggerSync();
+  }, [triggerSync]);
+
+  const deleteOrder = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    setOrders(prev => prev.filter(o => o.id !== id));
+    await db.orders.update(id, { deleted_at: now, updated_at: now, _syncStatus: 'deleted' });
+    triggerSync();
+  }, [triggerSync]);
 
   // ── Dépenses ──────────────────────────────────────────────────────────────
-  const addExpense = useCallback((data: Omit<Expense, 'id' | 'pressing_id' | 'created_at'>) => {
-    const e: Expense = { ...data, id: `exp-${Date.now()}`, pressing_id: userId, created_at: new Date().toISOString() };
-    setExpenses(prev => {
-      const next = [e, ...prev];
-      save(k.expenses, next);
-      return next;
-    });
-    return e;
-  }, [userId, k.expenses]);
+  const addExpense = useCallback(async (data: Omit<Expense, 'id' | 'pressing_id' | 'created_at'>) => {
+    const now = new Date().toISOString();
+    const e: LocalExpense = {
+      ...data,
+      id: `exp-${Date.now()}`,
+      pressing_id: userId,
+      user_id: userId,
+      created_at: now,
+      updated_at: now,
+      _syncStatus: 'pending',
+    };
 
-  const deleteExpense = useCallback((id: string) => {
-    setExpenses(prev => {
-      const next = prev.filter(e => e.id !== id);
-      save(k.expenses, next);
-      return next;
-    });
-  }, [k.expenses]);
+    setExpenses(prev => [e, ...prev]);
+    await db.expenses.put(e);
+    triggerSync();
+    return e;
+  }, [userId, triggerSync]);
+
+  const deleteExpense = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    setExpenses(prev => prev.filter(e => e.id !== id));
+    await db.expenses.update(id, { deleted_at: now, updated_at: now, _syncStatus: 'deleted' });
+    triggerSync();
+  }, [triggerSync]);
 
   return {
     isLoaded, pressing, offers, customers, orders, expenses,

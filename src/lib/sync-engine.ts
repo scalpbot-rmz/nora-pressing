@@ -1,12 +1,20 @@
-import { db, SyncStatus } from './db';
+import { db, TableName, SyncStatus } from './db';
 import { createClient } from './supabase/client';
 
-const TABLES = ['pressings', 'offers', 'customers', 'orders', 'expenses'] as const;
-type TableName = (typeof TABLES)[number];
+const TABLES: TableName[] = ['pressings', 'offers', 'customers', 'orders', 'expenses'];
 
 export class SyncEngine {
   private isSyncing = false;
   private realtimeSubscription: any = null;
+
+  /**
+   * Notification des abonnés (store React) en cas de changement DB
+   */
+  public notifyListeners() {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('nora-db-change'));
+    }
+  }
 
   /**
    * Effectue une synchronisation complète (push local -> cloud, puis pull cloud -> local)
@@ -28,6 +36,8 @@ export class SyncEngine {
       for (const table of TABLES) {
         await this.pullTable(table, userId, supabase);
       }
+
+      this.notifyListeners();
     } catch (err) {
       console.error('Erreur lors de la synchronisation:', err);
     } finally {
@@ -40,54 +50,61 @@ export class SyncEngine {
    */
   private async pushTable(tableName: TableName, userId: string, supabase: any) {
     const dexieTable = (db as any)[tableName];
+    if (!dexieTable) return;
 
-    // Trouver tous les enregistrements locaux avec _syncStatus pending ou deleted
-    const pendingItems = await dexieTable
-      .where('_syncStatus')
-      .equals('pending')
-      .toArray();
+    try {
+      const pendingItems = await dexieTable
+        .where('_syncStatus')
+        .equals('pending')
+        .toArray();
 
-    const deletedItems = await dexieTable
-      .where('_syncStatus')
-      .equals('deleted')
-      .toArray();
+      const deletedItems = await dexieTable
+        .where('_syncStatus')
+        .equals('deleted')
+        .toArray();
 
-    // 1. Envoyer les nouveaux/modifiés
-    for (const item of pendingItems) {
-      const { _syncStatus, ...payload } = item;
-      payload.user_id = userId;
-      payload.updated_at = payload.updated_at || new Date().toISOString();
+      // 1. Envoyer les nouveaux/modifiés
+      for (const item of pendingItems) {
+        const { _syncStatus, ...payload } = item;
+        payload.user_id = userId;
+        payload.updated_at = payload.updated_at || new Date().toISOString();
 
-      const { error } = await supabase
-        .from(tableName)
-        .upsert(payload, { onConflict: 'id' });
+        // Protection Logo : si c'est la table pressings et que logo_url est vide/undefined, on ne l'écrase pas si existant sur Supabase
+        if (tableName === 'pressings' && !payload.logo_url) {
+          delete payload.logo_url;
+        }
 
-      if (!error) {
-        await dexieTable.update(item.id, { _syncStatus: 'synced' });
-      } else {
-        console.error(`Erreur Push ${tableName}:`, error);
-      }
-    }
-
-    // 2. Traiter les suppressions
-    for (const item of deletedItems) {
-      if (item.deleted_at) {
-        // Soft delete sur Supabase
         const { error } = await supabase
           .from(tableName)
-          .update({ deleted_at: item.deleted_at, updated_at: new Date().toISOString() })
-          .eq('id', item.id);
+          .upsert(payload, { onConflict: 'id' });
 
         if (!error) {
-          await dexieTable.delete(item.id);
-        }
-      } else {
-        // Hard delete si pas de deleted_at
-        const { error } = await supabase.from(tableName).delete().eq('id', item.id);
-        if (!error) {
-          await dexieTable.delete(item.id);
+          await dexieTable.update(item.id, { _syncStatus: 'synced' });
+        } else {
+          console.error(`Erreur Push ${tableName}:`, error);
         }
       }
+
+      // 2. Traiter les suppressions
+      for (const item of deletedItems) {
+        if (item.deleted_at) {
+          const { error } = await supabase
+            .from(tableName)
+            .update({ deleted_at: item.deleted_at, updated_at: new Date().toISOString() })
+            .eq('id', item.id);
+
+          if (!error) {
+            await dexieTable.delete(item.id);
+          }
+        } else {
+          const { error } = await supabase.from(tableName).delete().eq('id', item.id);
+          if (!error) {
+            await dexieTable.delete(item.id);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[SyncEngine] Push table ${tableName} ignoré:`, e);
     }
   }
 
@@ -96,39 +113,42 @@ export class SyncEngine {
    */
   private async pullTable(tableName: TableName, userId: string, supabase: any) {
     const dexieTable = (db as any)[tableName];
+    if (!dexieTable) return;
 
-    const { data: remoteItems, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .eq('user_id', userId);
+    try {
+      const { data: remoteItems, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .eq('user_id', userId);
 
-    if (error || !remoteItems) {
-      if (error) console.error(`Erreur Pull ${tableName}:`, error);
-      return;
-    }
+      if (error || !remoteItems) return;
 
-    for (const remote of remoteItems) {
-      const local = await dexieTable.get(remote.id);
+      for (const remote of remoteItems) {
+        const local = await dexieTable.get(remote.id);
 
-      // Si l'élément est marqué comme supprimé à distance
-      if (remote.deleted_at) {
-        if (local) {
-          await dexieTable.delete(remote.id);
+        if (remote.deleted_at) {
+          if (local) await dexieTable.delete(remote.id);
+          continue;
         }
-        continue;
-      }
 
-      // Si local n'existe pas ou remote est plus récent et pas localement 'pending'
-      if (!local) {
-        await dexieTable.put({ ...remote, _syncStatus: 'synced' });
-      } else if (local._syncStatus !== 'pending') {
-        const localTime = new Date(local.updated_at || 0).getTime();
-        const remoteTime = new Date(remote.updated_at || 0).getTime();
-
-        if (remoteTime >= localTime) {
+        if (!local) {
           await dexieTable.put({ ...remote, _syncStatus: 'synced' });
+        } else if (local._syncStatus !== 'pending') {
+          const localTime = new Date(local.updated_at || 0).getTime();
+          const remoteTime = new Date(remote.updated_at || 0).getTime();
+
+          if (remoteTime >= localTime) {
+            // Conserver le logo local si le remote n'en a pas
+            const patch = { ...remote, _syncStatus: 'synced' };
+            if (tableName === 'pressings' && !remote.logo_url && local.logo_url) {
+              patch.logo_url = local.logo_url;
+            }
+            await dexieTable.put(patch);
+          }
         }
       }
+    } catch (e) {
+      console.warn(`[SyncEngine] Pull table ${tableName} ignoré:`, e);
     }
   }
 
@@ -144,20 +164,33 @@ export class SyncEngine {
     }
 
     this.realtimeSubscription = supabase
-      .channel('nora-realtime')
+      .channel(`nora-realtime-${userId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public' },
         async (payload: any) => {
-          if (payload.new && payload.new.user_id === userId) {
+          const newItem = payload.new || payload.old;
+          if (newItem && (newItem.user_id === userId || !newItem.user_id)) {
             const table = payload.table as TableName;
             if (TABLES.includes(table)) {
               const dexieTable = (db as any)[table];
-              if (payload.new.deleted_at) {
-                await dexieTable.delete(payload.new.id);
-              } else {
-                await dexieTable.put({ ...payload.new, _syncStatus: 'synced' });
+              if (!dexieTable) return;
+
+              if (payload.eventType === 'DELETE' || (payload.new && payload.new.deleted_at)) {
+                await dexieTable.delete(newItem.id);
+              } else if (payload.new) {
+                const local = await dexieTable.get(payload.new.id);
+                // Ne pas écraser si l'utilisateur local a une modif en attente non synchronisée
+                if (!local || local._syncStatus !== 'pending') {
+                  const patch = { ...payload.new, _syncStatus: 'synced' };
+                  if (table === 'pressings' && !payload.new.logo_url && local?.logo_url) {
+                    patch.logo_url = local.logo_url;
+                  }
+                  await dexieTable.put(patch);
+                }
               }
+
+              this.notifyListeners();
               if (onUpdate) onUpdate();
             }
           }
