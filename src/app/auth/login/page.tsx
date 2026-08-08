@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { loginUser, resendVerificationEmail } from '@/lib/auth';
+import { loginUser } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -12,40 +12,25 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [requiresVerification, setRequiresVerification] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [resending, setResending] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setRequiresVerification(false);
-    setResendSuccess(false);
 
-    const res = await loginUser({ email, password });
-    setLoading(false);
+    try {
+      const res = await loginUser({ email, password });
+      setLoading(false);
 
-    if (res.success) {
-      router.push('/dashboard');
-    } else {
-      if (res.requiresVerification) {
-        setRequiresVerification(true);
+      if (res.success) {
+        router.push('/dashboard');
+      } else {
+        setError(res.error || 'Adresse e-mail ou mot de passe incorrect.');
       }
-      setError(res.error || 'Erreur de connexion');
-    }
-  }
-
-  async function handleResend() {
-    if (!email) return;
-    setResending(true);
-    const res = await resendVerificationEmail(email);
-    setResending(false);
-    if (res.success) {
-      setResendSuccess(true);
-    } else {
-      setError(res.error || 'Erreur lors du renvoi de l’email.');
+    } catch (err: any) {
+      setLoading(false);
+      setError('Impossible de se connecter. Veuillez vérifier vos identifiants.');
     }
   }
 
@@ -68,24 +53,8 @@ export default function LoginPage() {
 
         {/* Erreurs & Notifications */}
         {error && (
-          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-3 text-xs font-medium text-center space-y-2">
-            <p>{error}</p>
-            {requiresVerification && (
-              <button
-                type="button"
-                onClick={handleResend}
-                disabled={resending}
-                className="underline text-blue-400 hover:text-blue-300 font-bold block mx-auto text-[11px]"
-              >
-                {resending ? 'Envoi en cours...' : 'Renvoyer l’email de vérification'}
-              </button>
-            )}
-          </div>
-        )}
-
-        {resendSuccess && (
-          <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl px-4 py-2.5 text-xs font-medium text-center">
-            Un nouvel e-mail de vérification a été envoyé à {email}.
+          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-3 text-xs font-medium text-center">
+            {error}
           </div>
         )}
 

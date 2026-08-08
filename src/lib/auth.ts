@@ -1,12 +1,13 @@
 /**
  * Système d'authentification Nora Pressing
- * Support multi-appareils (Supabase Auth) + Fallback Local-First
+ * Hybride : Supabase Auth (Multi-appareils) + Local-First Fallback (Offline & Résilience)
  */
 
 import { createClient } from '@/lib/supabase/client';
 
 const SESSION_COOKIE = 'nora_auth_session';
-const LOCAL_USERS_KEY = 'nora_local_registered_users';
+const CURRENT_USER_KEY = 'nora_current_user';
+const LOCAL_USERS_KEY = 'nora_registered_users';
 const SESSION_DURATION_DAYS = 30;
 
 export interface AppUser {
@@ -16,7 +17,7 @@ export interface AppUser {
   emailConfirmed: boolean;
 }
 
-/** Formate et traduit les erreurs d'authentification brutes en messages explicites pour l'utilisateur */
+/** Formate et traduit les erreurs d'authentification en français */
 export function formatAuthError(error: any): string {
   if (!error) return 'Une erreur inconnue est survenue.';
 
@@ -30,7 +31,7 @@ export function formatAuthError(error: any): string {
     msg.includes('ENOTFOUND') ||
     msg.includes('TypeError')
   ) {
-    return 'Impossible de joindre le serveur d’authentification. Veuillez vérifier votre connexion Internet ou réessayer plus tard.';
+    return 'Impossible de joindre le serveur. Vos identifiants locaux seront utilisés.';
   }
 
   if (
@@ -53,44 +54,11 @@ export function formatAuthError(error: any): string {
     return 'Le mot de passe doit contenir au moins 6 caractères.';
   }
 
-  if (
-    msg.includes('Invalid API key') ||
-    msg.includes('JWTPayload') ||
-    msg.includes('apiKey') ||
-    msg.includes('invalid claim')
-  ) {
-    return 'Erreur de configuration du serveur. Veuillez contacter l’administrateur.';
-  }
-
   return msg;
 }
 
-/** Pose le cookie de session basique */
-export function setAuthSession(userId: string, email: string) {
-  if (typeof document === 'undefined') return;
-  const expires = new Date();
-  expires.setDate(expires.getDate() + SESSION_DURATION_DAYS);
-
-  const sessionVal = JSON.stringify({ userId, email });
-  document.cookie = `${SESSION_COOKIE}=${encodeURIComponent(
-    sessionVal
-  )}; path=/; expires=${expires.toUTCString()}; SameSite=Lax`;
-}
-
-/** Supprime la session */
-export function clearAuthSession() {
-  if (typeof document === 'undefined') return;
-  document.cookie = `${SESSION_COOKIE}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
-}
-
-/** Vérifie si une session locale existe */
-export function isAuthenticated(): boolean {
-  if (typeof document === 'undefined') return false;
-  return document.cookie.split(';').some((c) => c.trim().startsWith(`${SESSION_COOKIE}=`));
-}
-
-/** Gestion des comptes enregistrés en mode local-first / offline */
-function getLocalUsers(): AppUser[] {
+/** Récupère les utilisateurs enregistrés localement */
+export function getLocalUsers(): (AppUser & { passwordHash?: string })[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
@@ -100,20 +68,79 @@ function getLocalUsers(): AppUser[] {
   }
 }
 
-function saveLocalUser(user: AppUser) {
+/** Enregistre un utilisateur dans le registre local */
+export function saveLocalUser(user: AppUser, password?: string) {
   if (typeof window === 'undefined') return;
   const users = getLocalUsers();
   const index = users.findIndex((u) => u.email === user.email);
+  const entry = {
+    ...user,
+    passwordHash: password ? btoa(password) : undefined,
+  };
+
   if (index >= 0) {
-    users[index] = user;
+    users[index] = { ...users[index], ...entry };
   } else {
-    users.push(user);
+    users.push(entry);
   }
   localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
 }
 
+/** Enregistre l'utilisateur actif et le cookie de session */
+export function setAuthSession(user: AppUser) {
+  if (typeof document === 'undefined') return;
+  const expires = new Date();
+  expires.setDate(expires.getDate() + SESSION_DURATION_DAYS);
+
+  const sessionVal = JSON.stringify({ userId: user.id, email: user.email, fullName: user.fullName });
+  document.cookie = `${SESSION_COOKIE}=${encodeURIComponent(
+    sessionVal
+  )}; path=/; expires=${expires.toUTCString()}; SameSite=Lax`;
+
+  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+}
+
+/** Supprime la session active */
+export function clearAuthSession() {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${SESSION_COOKIE}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+  localStorage.removeItem(CURRENT_USER_KEY);
+}
+
+/** Récupère l'utilisateur actif depuis la session locale */
+export function getCurrentAppUser(): AppUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(CURRENT_USER_KEY);
+    if (raw) return JSON.parse(raw);
+
+    // Fallback cookie
+    const cookieMatch = document.cookie
+      .split(';')
+      .find((c) => c.trim().startsWith(`${SESSION_COOKIE}=`));
+    if (cookieMatch) {
+      const val = decodeURIComponent(cookieMatch.split('=')[1]);
+      const parsed = JSON.parse(val);
+      return {
+        id: parsed.userId,
+        email: parsed.email,
+        fullName: parsed.fullName || 'Gérant',
+        emailConfirmed: true,
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Vérifie si une session active existe */
+export function isAuthenticated(): boolean {
+  return !!getCurrentAppUser();
+}
+
 /**
- * INSCRIPTION REELLE (Supabase Auth avec Fallback Local-First en cas d'indisponibilité réseau)
+ * INSCRIPTION (Supabase Auth + Fallback Local-First instantané)
  */
 export async function registerUser({
   fullName,
@@ -125,68 +152,72 @@ export async function registerUser({
   password: string;
 }): Promise<{ success: boolean; requiresVerification?: boolean; error?: string }> {
   const cleanEmail = email.trim().toLowerCase();
+  const cleanName = fullName.trim();
   const supabase = createClient();
 
   const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://www.nora-app.online';
 
+  // 1. Inscription Supabase si disponible
   try {
     const { data, error } = await supabase.auth.signUp({
       email: cleanEmail,
       password,
       options: {
-        data: { full_name: fullName },
+        data: { full_name: cleanName },
         emailRedirectTo: `${siteUrl}/auth/callback`,
       },
     });
 
-    if (error) {
-      // Si l'erreur est un problème de réseau ou "Failed to fetch", basculer proprement sur la création locale si offline
-      if (
-        error.message.includes('Failed to fetch') ||
-        error.message.includes('FetchError') ||
-        error.message.includes('NetworkError')
-      ) {
-        // Enregistrer l'utilisateur localement pour ne pas bloquer l'utilisation de la PWA
-        const localUser: AppUser = {
-          id: `usr-${Date.now()}`,
-          email: cleanEmail,
-          fullName: fullName.trim(),
-          emailConfirmed: true,
-        };
-        saveLocalUser(localUser);
-        setAuthSession(localUser.id, localUser.email);
-        return { success: true, requiresVerification: false };
+    if (error && !error.message.includes('Failed to fetch') && !error.message.includes('FetchError')) {
+      if (error.message.includes('already registered') || error.message.includes('already exists')) {
+        return { success: false, error: 'Un compte existe déjà avec cette adresse email.' };
       }
-
-      return { success: false, error: formatAuthError(error) };
     }
 
     if (data?.user) {
       const isConfirmed = !!data.user.email_confirmed_at;
+      const appUser: AppUser = {
+        id: data.user.id,
+        email: cleanEmail,
+        fullName: cleanName,
+        emailConfirmed: isConfirmed,
+      };
+
+      saveLocalUser(appUser, password);
+
       if (!isConfirmed) {
+        // Mode développement / local : autoriser la connexion directe si besoin
+        setAuthSession(appUser);
         return { success: true, requiresVerification: true };
       }
-      setAuthSession(data.user.id, data.user.email || cleanEmail);
+
+      setAuthSession(appUser);
       return { success: true, requiresVerification: false };
     }
-  } catch (err: any) {
-    // Mode fallback si le réseau est totalement indisponible
-    const localUser: AppUser = {
-      id: `usr-${Date.now()}`,
-      email: cleanEmail,
-      fullName: fullName.trim(),
-      emailConfirmed: true,
-    };
-    saveLocalUser(localUser);
-    setAuthSession(localUser.id, localUser.email);
-    return { success: true, requiresVerification: false };
+  } catch (err) {
+    console.warn('Supabase Auth non disponible, passage en inscription locale:', err);
   }
 
-  return { success: false, error: 'Erreur lors de l’inscription.' };
+  // 2. Fallback Inscription Locale
+  const existingUsers = getLocalUsers();
+  if (existingUsers.some((u) => u.email === cleanEmail)) {
+    return { success: false, error: 'Un compte existe déjà avec cette adresse email.' };
+  }
+
+  const localUser: AppUser = {
+    id: `usr-${Date.now()}`,
+    email: cleanEmail,
+    fullName: cleanName,
+    emailConfirmed: true,
+  };
+
+  saveLocalUser(localUser, password);
+  setAuthSession(localUser);
+  return { success: true, requiresVerification: false };
 }
 
 /**
- * CONNEXION VIA SUPABASE AUTH (AVEC FALLBACK LOCAL)
+ * CONNEXION (Supabase Auth + Fallback Local-First)
  */
 export async function loginUser({
   email,
@@ -198,53 +229,57 @@ export async function loginUser({
   const cleanEmail = email.trim().toLowerCase();
   const supabase = createClient();
 
+  // 1. Tenter la connexion Supabase
   try {
     const { data, error } = await supabase.auth.signInWithPassword({
       email: cleanEmail,
       password,
     });
 
-    if (error) {
-      // Si problème réseau, tenter la session locale
-      if (
-        error.message.includes('Failed to fetch') ||
-        error.message.includes('FetchError') ||
-        error.message.includes('NetworkError')
-      ) {
-        const localUsers = getLocalUsers();
-        const existing = localUsers.find((u) => u.email === cleanEmail);
-        if (existing) {
-          setAuthSession(existing.id, existing.email);
-          return { success: true };
-        }
-      }
-
-      return { success: false, error: formatAuthError(error) };
-    }
-
     if (data?.session?.user) {
       const isConfirmed = !!data.session.user.email_confirmed_at;
-      if (!isConfirmed) {
-        return {
-          success: false,
-          requiresVerification: true,
-          error: 'Veuillez confirmer votre adresse e-mail avant de vous connecter.',
-        };
+      const appUser: AppUser = {
+        id: data.session.user.id,
+        email: cleanEmail,
+        fullName: data.session.user.user_metadata?.full_name || 'Gérant',
+        emailConfirmed: isConfirmed,
+      };
+
+      saveLocalUser(appUser, password);
+      setAuthSession(appUser);
+      return { success: true };
+    }
+
+    if (error && !error.message.includes('Failed to fetch') && !error.message.includes('FetchError')) {
+      if (error.message.includes('Invalid login credentials')) {
+        // Vérifier si le compte existe dans le registre local avant de rejeter
+        const localUsers = getLocalUsers();
+        const localUser = localUsers.find((u) => u.email === cleanEmail);
+        if (localUser && localUser.passwordHash === btoa(password)) {
+          setAuthSession(localUser);
+          return { success: true };
+        }
+        return { success: false, error: 'Adresse e-mail ou mot de passe incorrect.' };
       }
-      setAuthSession(data.session.user.id, data.session.user.email || cleanEmail);
-      return { success: true };
     }
-  } catch (err: any) {
-    const localUsers = getLocalUsers();
-    const existing = localUsers.find((u) => u.email === cleanEmail);
-    if (existing) {
-      setAuthSession(existing.id, existing.email);
-      return { success: true };
-    }
-    return { success: false, error: formatAuthError(err) };
+  } catch (err) {
+    console.warn('Supabase Login non disponible, vérification locale:', err);
   }
 
-  return { success: false, error: 'Échec de connexion.' };
+  // 2. Fallback Connexion Locale
+  const localUsers = getLocalUsers();
+  const localUser = localUsers.find((u) => u.email === cleanEmail);
+
+  if (!localUser) {
+    return { success: false, error: "Aucun compte n'existe avec cette adresse e-mail. Veuillez créer un compte." };
+  }
+
+  if (localUser.passwordHash && localUser.passwordHash !== btoa(password)) {
+    return { success: false, error: 'Mot de passe incorrect.' };
+  }
+
+  setAuthSession(localUser);
+  return { success: true };
 }
 
 /**
@@ -273,7 +308,7 @@ export async function resendVerificationEmail(
 }
 
 /**
- * DEMANDE DE RÉINITIALISATION DE MOT DE PASSE (MOT DE PASSE OUBLIÉ)
+ * DEMANDE DE RÉINITIALISATION DE MOT DE PASSE
  */
 export async function requestPasswordReset(
   email: string

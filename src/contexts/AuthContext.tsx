@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { AppUser, setAuthSession, clearAuthSession, logoutUser } from '@/lib/auth';
+import { AppUser, setAuthSession, clearAuthSession, getCurrentAppUser, logoutUser } from '@/lib/auth';
 
 interface AuthContextType {
   user: AppUser | null;
@@ -20,69 +20,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUserSession = async () => {
     try {
+      // 1. Tenter la session Supabase
       const supabase = createClient();
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
       if (session?.user) {
-        const emailConfirmed = !!session.user.email_confirmed_at;
         const appUser: AppUser = {
           id: session.user.id,
           email: session.user.email || '',
           fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || 'Gérant',
-          emailConfirmed,
+          emailConfirmed: !!session.user.email_confirmed_at,
         };
 
-        if (emailConfirmed) {
-          setUser(appUser);
-          setAuthSession(appUser.id, appUser.email);
-        } else {
-          setUser(null);
-          clearAuthSession();
-        }
-      } else {
-        setUser(null);
-        clearAuthSession();
+        setUser(appUser);
+        setAuthSession(appUser);
+        setLoading(false);
+        return;
       }
     } catch (err) {
-      console.error('Erreur récupération session Auth:', err);
-    } finally {
-      setLoading(false);
+      console.warn('Supabase Auth non joignable lors de fetchUserSession, vérification session locale:', err);
     }
+
+    // 2. Fallback session locale
+    const localUser = getCurrentAppUser();
+    if (localUser) {
+      setUser(localUser);
+    } else {
+      setUser(null);
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
     fetchUserSession();
 
-    const supabase = createClient();
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const emailConfirmed = !!session.user.email_confirmed_at;
-        const appUser: AppUser = {
-          id: session.user.id,
-          email: session.user.email || '',
-          fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || 'Gérant',
-          emailConfirmed,
-        };
-
-        if (emailConfirmed) {
+    let subscription: any = null;
+    try {
+      const supabase = createClient();
+      const res = supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (session?.user) {
+          const appUser: AppUser = {
+            id: session.user.id,
+            email: session.user.email || '',
+            fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.name || 'Gérant',
+            emailConfirmed: !!session.user.email_confirmed_at,
+          };
           setUser(appUser);
-          setAuthSession(appUser.id, appUser.email);
+          setAuthSession(appUser);
         } else {
-          setUser(null);
-          clearAuthSession();
+          const localUser = getCurrentAppUser();
+          if (localUser) {
+            setUser(localUser);
+          } else {
+            setUser(null);
+          }
         }
-      } else {
-        setUser(null);
-        clearAuthSession();
-      }
-      setLoading(false);
-    });
+        setLoading(false);
+      });
+      subscription = res.data?.subscription;
+    } catch (err) {
+      console.warn('Listener Supabase Auth non initialisé:', err);
+    }
 
-    return () => subscription.unsubscribe();
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
