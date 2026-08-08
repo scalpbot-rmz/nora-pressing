@@ -11,30 +11,51 @@ import {
   initialOrders, initialExpenses,
 } from './mock-data';
 import { db, LocalPressing } from './db';
-import { syncEngine } from './sync-engine';
 import { useAuth } from '@/contexts/AuthContext';
 
 export function useNoraStore() {
   const { user } = useAuth();
   const userId = user?.id || 'guest';
 
-  // Live queries de Dexie pour un rafraîchissement réactif automatique
-  const dbPressing  = useLiveQuery(() => db.pressings.get(userId), [userId]);
-  const dbOffers    = useLiveQuery(() => db.offers.where({ deleted_at: null }).toArray(), []);
-  const dbCustomers = useLiveQuery(() => db.customers.where({ deleted_at: null }).toArray(), []);
-  const dbOrders    = useLiveQuery(() => db.orders.where({ deleted_at: null }).reverse().sortBy('created_at'), []);
-  const dbExpenses  = useLiveQuery(() => db.expenses.where({ deleted_at: null }).reverse().sortBy('created_at'), []);
+  // ─── Live queries Dexie (syntaxe correcte) ────────────────────────────
+  const dbPressing = useLiveQuery(
+    () => db.pressings.get(userId),
+    [userId]
+  );
+
+  const dbOffers = useLiveQuery(
+    () => db.offers.filter(o => !o.deleted_at).toArray(),
+    []
+  );
+
+  const dbCustomers = useLiveQuery(
+    () => db.customers.filter(c => !c.deleted_at).toArray(),
+    []
+  );
+
+  const dbOrders = useLiveQuery(
+    () => db.orders.filter(o => !o.deleted_at).toArray().then(rows =>
+      rows.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+    ),
+    []
+  );
+
+  const dbExpenses = useLiveQuery(
+    () => db.expenses.filter(e => !e.deleted_at).toArray().then(rows =>
+      rows.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+    ),
+    []
+  );
 
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Initialisation et migration depuis localStorage au premier lancement si nécessaire
+  // ─── Initialisation et migration depuis localStorage ──────────────────
   useEffect(() => {
     async function initDB() {
       try {
         const existingPressing = await db.pressings.get(userId);
         if (!existingPressing) {
-          // Migration localStorage -> IndexedDB
-          const legacyP = localStorage.getItem('nora_pressing_data');
+          const legacyP  = localStorage.getItem('nora_pressing_data');
           const legacyOf = localStorage.getItem('nora_offers_data');
           const legacyCu = localStorage.getItem('nora_customers_data');
           const legacyOr = localStorage.getItem('nora_orders_data');
@@ -73,7 +94,7 @@ export function useNoraStore() {
     initDB();
   }, [userId, user?.fullName]);
 
-  // Fallbacks vers valeurs par défaut
+  // ─── Fallbacks vers valeurs par défaut ────────────────────────────────
   const pressing: Pressing = dbPressing || {
     ...initialPressing,
     id: userId,
@@ -81,19 +102,22 @@ export function useNoraStore() {
     name: user?.fullName || 'Mon Pressing',
   };
 
-  const offers: Offer[]       = dbOffers || initialOffers;
+  const offers: Offer[]       = dbOffers    || initialOffers;
   const customers: Customer[] = dbCustomers || initialCustomers;
-  const orders: Order[]       = dbOrders || initialOrders;
-  const expenses: Expense[]   = dbExpenses || initialExpenses;
+  const orders: Order[]       = dbOrders    || initialOrders;
+  const expenses: Expense[]   = dbExpenses  || initialExpenses;
 
-  // Helper pour déclencher la synchronisation après une écriture
+  // ─── Sync helper ─────────────────────────────────────────────────────
   const triggerSync = () => {
-    if (user?.id && navigator.onLine) {
-      syncEngine.syncAll(user.id);
-    }
+    if (!user?.id || typeof navigator === 'undefined' || !navigator.onLine) return;
+    try {
+      import('@/lib/sync-engine').then(({ syncEngine }) => {
+        syncEngine.syncAll(user.id).catch(console.warn);
+      });
+    } catch {}
   };
 
-  // ── Pressing ───────────────────────────────────────────────────────────
+  // ── Pressing ──────────────────────────────────────────────────────────
   const updatePressing = async (updated: Partial<Pressing>) => {
     const updatedRecord: LocalPressing = {
       ...pressing,
@@ -103,12 +127,11 @@ export function useNoraStore() {
       updated_at: new Date().toISOString(),
       _syncStatus: 'pending',
     };
-
     await db.pressings.put(updatedRecord);
     triggerSync();
   };
 
-  // ── Offres ─────────────────────────────────────────────────────────────
+  // ── Offres ────────────────────────────────────────────────────────────
   const addOffer = async (data: Omit<Offer, 'id' | 'pressing_id' | 'created_at'>) => {
     const now = new Date().toISOString();
     const offer: Offer = {
@@ -117,41 +140,24 @@ export function useNoraStore() {
       pressing_id: pressing.id,
       created_at: now,
     };
-
-    await db.offers.put({
-      ...offer,
-      user_id: userId,
-      updated_at: now,
-      _syncStatus: 'pending',
-    });
+    await db.offers.put({ ...offer, user_id: userId, updated_at: now, _syncStatus: 'pending' });
     triggerSync();
     return offer;
   };
 
   const updateOffer = async (id: string, updated: Partial<Offer>) => {
-    const existing = await db.offers.get(id);
-    if (!existing) return;
-
-    await db.offers.update(id, {
-      ...updated,
-      updated_at: new Date().toISOString(),
-      _syncStatus: 'pending',
-    });
+    await db.offers.update(id, { ...updated, updated_at: new Date().toISOString(), _syncStatus: 'pending' });
     triggerSync();
   };
 
   const deleteOffer = async (id: string) => {
-    await db.offers.update(id, {
-      deleted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      _syncStatus: 'deleted',
-    });
+    await db.offers.update(id, { deleted_at: new Date().toISOString(), updated_at: new Date().toISOString(), _syncStatus: 'deleted' });
     triggerSync();
   };
 
-  // ── Clients ────────────────────────────────────────────────────────────
+  // ── Clients ───────────────────────────────────────────────────────────
   const addCustomer = async (data: { name?: string; phone: string; address?: string }) => {
-    const existing = customers.find((c) => c.phone.trim() === data.phone.trim());
+    const existing = customers.find(c => c.phone.trim() === data.phone.trim());
     if (existing) return existing;
 
     const now = new Date().toISOString();
@@ -166,36 +172,22 @@ export function useNoraStore() {
       last_visit_at: now,
       created_at: now,
     };
-
-    await db.customers.put({
-      ...c,
-      user_id: userId,
-      updated_at: now,
-      _syncStatus: 'pending',
-    });
+    await db.customers.put({ ...c, user_id: userId, updated_at: now, _syncStatus: 'pending' });
     triggerSync();
     return c;
   };
 
   const updateCustomer = async (id: string, data: Partial<Pick<Customer, 'name' | 'phone' | 'address'>>) => {
-    await db.customers.update(id, {
-      ...data,
-      updated_at: new Date().toISOString(),
-      _syncStatus: 'pending',
-    });
+    await db.customers.update(id, { ...data, updated_at: new Date().toISOString(), _syncStatus: 'pending' });
     triggerSync();
   };
 
   const deleteCustomer = async (id: string) => {
-    await db.customers.update(id, {
-      deleted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      _syncStatus: 'deleted',
-    });
+    await db.customers.update(id, { deleted_at: new Date().toISOString(), updated_at: new Date().toISOString(), _syncStatus: 'deleted' });
     triggerSync();
   };
 
-  // ── Commandes ──────────────────────────────────────────────────────────
+  // ── Commandes ─────────────────────────────────────────────────────────
   const addOrder = async (orderData: Omit<Order, 'id' | 'pressing_id' | 'invoice_number' | 'created_at'>) => {
     const prefix = pressing.invoice_prefix || 'NOR';
     const num    = `${prefix}-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`;
@@ -206,12 +198,12 @@ export function useNoraStore() {
       custId = c.id;
     }
 
-    const gross          = orderData.quantity * orderData.unit_price;
-    const pickup_fee     = orderData.pickup_fee    || 0;
-    const delivery_fee   = orderData.delivery_fee  || 0;
-    const total_amount   = gross + pickup_fee + delivery_fee;
-    const amount_paid    = orderData.amount_paid   || 0;
-    const remaining      = Math.max(0, total_amount - amount_paid);
+    const gross        = orderData.quantity * orderData.unit_price;
+    const pickup_fee   = orderData.pickup_fee   || 0;
+    const delivery_fee = orderData.delivery_fee || 0;
+    const total_amount = gross + pickup_fee + delivery_fee;
+    const amount_paid  = orderData.amount_paid  || 0;
+    const remaining    = Math.max(0, total_amount - amount_paid);
     const payment_status: PaymentStatus = remaining <= 0 ? 'paid' : 'unpaid';
 
     const now = new Date().toISOString();
@@ -231,12 +223,7 @@ export function useNoraStore() {
       created_at: now,
     };
 
-    await db.orders.put({
-      ...newOrder,
-      user_id: userId,
-      updated_at: now,
-      _syncStatus: 'pending',
-    });
+    await db.orders.put({ ...newOrder, user_id: userId, updated_at: now, _syncStatus: 'pending' });
 
     if (custId) {
       const cust = await db.customers.get(custId);
@@ -256,12 +243,7 @@ export function useNoraStore() {
   };
 
   const updateOrderStatus = async (id: string, treatment_status: TreatmentStatus) => {
-    const now = new Date().toISOString();
-    await db.orders.update(id, {
-      treatment_status,
-      updated_at: now,
-      _syncStatus: 'pending',
-    });
+    await db.orders.update(id, { treatment_status, updated_at: new Date().toISOString(), _syncStatus: 'pending' });
     triggerSync();
   };
 
@@ -273,28 +255,16 @@ export function useNoraStore() {
     const remaining_amount = Math.max(0, order.total_amount - amount_paid);
     const payment_status: PaymentStatus = remaining_amount <= 0 ? 'paid' : 'unpaid';
 
-    const now = new Date().toISOString();
-    await db.orders.update(id, {
-      amount_paid,
-      remaining_amount,
-      payment_status,
-      updated_at: now,
-      _syncStatus: 'pending',
-    });
+    await db.orders.update(id, { amount_paid, remaining_amount, payment_status, updated_at: new Date().toISOString(), _syncStatus: 'pending' });
     triggerSync();
   };
 
   const deleteOrder = async (id: string) => {
-    const now = new Date().toISOString();
-    await db.orders.update(id, {
-      deleted_at: now,
-      updated_at: now,
-      _syncStatus: 'deleted',
-    });
+    await db.orders.update(id, { deleted_at: new Date().toISOString(), updated_at: new Date().toISOString(), _syncStatus: 'deleted' });
     triggerSync();
   };
 
-  // ── Dépenses ───────────────────────────────────────────────────────────
+  // ── Dépenses ──────────────────────────────────────────────────────────
   const addExpense = async (data: Omit<Expense, 'id' | 'pressing_id' | 'created_at'>) => {
     const now = new Date().toISOString();
     const e: Expense = {
@@ -303,24 +273,13 @@ export function useNoraStore() {
       pressing_id: pressing.id,
       created_at: now,
     };
-
-    await db.expenses.put({
-      ...e,
-      user_id: userId,
-      updated_at: now,
-      _syncStatus: 'pending',
-    });
+    await db.expenses.put({ ...e, user_id: userId, updated_at: now, _syncStatus: 'pending' });
     triggerSync();
     return e;
   };
 
   const deleteExpense = async (id: string) => {
-    const now = new Date().toISOString();
-    await db.expenses.update(id, {
-      deleted_at: now,
-      updated_at: now,
-      _syncStatus: 'deleted',
-    });
+    await db.expenses.update(id, { deleted_at: new Date().toISOString(), updated_at: new Date().toISOString(), _syncStatus: 'deleted' });
     triggerSync();
   };
 

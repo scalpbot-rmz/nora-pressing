@@ -50,35 +50,30 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     const updatePendingCount = async () => {
       try {
         let count = 0;
-        count += await db.pressings.where('_syncStatus').equals('pending').count();
-        count += await db.offers.where('_syncStatus').equals('pending').count();
-        count += await db.customers.where('_syncStatus').equals('pending').count();
-        count += await db.orders.where('_syncStatus').equals('pending').count();
-        count += await db.expenses.where('_syncStatus').equals('pending').count();
-
-        count += await db.pressings.where('_syncStatus').equals('deleted').count();
-        count += await db.offers.where('_syncStatus').equals('deleted').count();
-        count += await db.customers.where('_syncStatus').equals('deleted').count();
-        count += await db.orders.where('_syncStatus').equals('deleted').count();
-        count += await db.expenses.where('_syncStatus').equals('deleted').count();
-
+        count += await db.pressings.where('_syncStatus').anyOf(['pending', 'deleted']).count();
+        count += await db.offers.where('_syncStatus').anyOf(['pending', 'deleted']).count();
+        count += await db.customers.where('_syncStatus').anyOf(['pending', 'deleted']).count();
+        count += await db.orders.where('_syncStatus').anyOf(['pending', 'deleted']).count();
+        count += await db.expenses.where('_syncStatus').anyOf(['pending', 'deleted']).count();
         setPendingCount(count);
       } catch (err) {
-        console.error('Erreur comptage pending:', err);
+        // Silently ignore Dexie errors — does not affect app functionality
       }
     };
 
     updatePendingCount();
-    const interval = setInterval(updatePendingCount, 4000);
+    const interval = setInterval(updatePendingCount, 10000);
     return () => clearInterval(interval);
   }, []);
 
   const runSync = async () => {
-    if (!user?.id || !navigator.onLine || isSyncing) return;
+    if (!user?.id || typeof navigator === 'undefined' || !navigator.onLine || isSyncing) return;
     setIsSyncing(true);
     try {
       await syncEngine.syncAll(user.id);
       setLastSyncAt(new Date());
+    } catch {
+      // Silently ignore sync errors
     } finally {
       setIsSyncing(false);
     }
